@@ -8,6 +8,7 @@ import { AuthProvider } from './services/AuthService';
 import { EconomyProvider, useEconomy } from './context/EconomyContext';
 import { MusicPlayerProvider } from './context/MusicPlayerContext';
 import { VideoPlayerProvider } from './context/VideoPlayerContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Navbar } from './components/Navbar';
 import { BottomNav } from './components/BottomNav';
 import { GoLiveModal } from './components/GoLiveModal';
@@ -90,37 +91,39 @@ function MainAppContent() {
         onOpenWealthModal={() => setIsWealthModalOpen(true)}
       />
 
-      {/* MAIN VIEW SWITCHER */}
+      {/* MAIN VIEW SWITCHER WITH ERROR BOUNDARY */}
       <main className="pb-12">
-        {(activeTab === 'live' || activeTab === 'streams') && (
-          <LiveStreamView mode="LIVE" />
-        )}
-        {activeTab === 'party' && (
-          <LiveStreamView mode="PARTY" />
-        )}
-        {activeTab === 'chat' && (
-          <ChatMenuView />
-        )}
-        {(activeTab === 'me' || activeTab === 'profile') && (
-          <MeView
-            setActiveTab={setActiveTab}
-            onOpenRechargeModal={() => setActiveTab('wallet')}
-            onOpenExchangeModal={() => setActiveTab('wallet')}
-            onOpenWithdrawalModal={() => setActiveTab('wallet')}
-            onOpenWealthModal={() => setIsWealthModalOpen(true)}
-          />
-        )}
-        {activeTab === 'social' && <SocialFeedView />}
-        {activeTab === 'families' && <FamiliesView />}
-        {activeTab === 'agencies' && <AgenciesView />}
-        {activeTab === 'missions' && <MissionsAndRewardsView />}
-        {activeTab === 'games' && <GamingCenter />}
-        {activeTab === 'wallet' && <WalletView />}
-        {activeTab === 'creator' && <CreatorStudioView />}
-        {activeTab === 'shopping' && <MarketplaceView />}
-        {activeTab === 'music' && <MusicAndPodcastsView />}
-        {activeTab === 'security' && <SecurityCenter />}
-        {activeTab === 'admin' && <AdminDashboardView />}
+        <ErrorBoundary fallbackTitle="Stream View Recovered">
+          {(activeTab === 'live' || activeTab === 'streams') && (
+            <LiveStreamView mode="LIVE" />
+          )}
+          {activeTab === 'party' && (
+            <LiveStreamView mode="PARTY" />
+          )}
+          {activeTab === 'chat' && (
+            <ChatMenuView />
+          )}
+          {(activeTab === 'me' || activeTab === 'profile') && (
+            <MeView
+              setActiveTab={setActiveTab}
+              onOpenRechargeModal={() => setActiveTab('wallet')}
+              onOpenExchangeModal={() => setActiveTab('wallet')}
+              onOpenWithdrawalModal={() => setActiveTab('wallet')}
+              onOpenWealthModal={() => setIsWealthModalOpen(true)}
+            />
+          )}
+          {activeTab === 'social' && <SocialFeedView />}
+          {activeTab === 'families' && <FamiliesView />}
+          {activeTab === 'agencies' && <AgenciesView />}
+          {activeTab === 'missions' && <MissionsAndRewardsView />}
+          {activeTab === 'games' && <GamingCenter />}
+          {activeTab === 'wallet' && <WalletView />}
+          {activeTab === 'creator' && <CreatorStudioView />}
+          {activeTab === 'shopping' && <MarketplaceView />}
+          {activeTab === 'music' && <MusicAndPodcastsView />}
+          {activeTab === 'security' && <SecurityCenter />}
+          {activeTab === 'admin' && <AdminDashboardView />}
+        </ErrorBoundary>
       </main>
 
       {/* BIGO STYLE BOTTOM FIXED NAVIGATION MENU */}
@@ -139,7 +142,7 @@ function MainAppContent() {
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="font-black text-pink-400 text-sm">Nexora</span>
-            <span>© 2026 Poppo & BIGO Style Live Streaming Platform</span>
+            <span>© 2026 Nexora Live & Social Platform</span>
           </div>
           <p className="text-[11px] text-slate-500">
             Coins (Premium Gifts) • Points (Gaming Arena) • Diamonds (Creator Earnings) • Agencies & Guilds

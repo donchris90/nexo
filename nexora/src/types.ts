@@ -24,7 +24,11 @@ export interface UserLevelState {
   charmLevel: number;
   creatorLevel: number;
   userTitle: string;
-  vipTier: 'FREE' | 'SILVER' | 'GOLD' | 'DIAMOND' | 'SUPER_VIP';
+  vipTier: 'FREE' | 'VIP1' | 'VIP2' | 'VIP3' | 'VIP4' | 'VIP5' | 'VIP6' | 'VIP7' | 'VIP8' | 'VIP9' | 'VIP10' | 'SILVER' | 'GOLD' | 'DIAMOND' | 'SUPER_VIP';
+  equippedFrameId?: string;
+  equippedEntranceEffectId?: string;
+  equippedTitleId?: string;
+  equippedVipBadgeId?: string;
   countryFlag: string;
   countryName: string;
   followersCount: number;
@@ -49,14 +53,19 @@ export interface FamilyMember {
 export interface Family {
   id: string;
   name: string;
+  badge?: string;
   logo: string;
   leaderName: string;
-  viceLeaderName: string;
+  viceLeaderName?: string;
   membersCount: number;
-  totalFamilyCoins: number;
-  familyRank: number;
-  description: string;
-  members: FamilyMember[];
+  maxMembers?: number;
+  level?: number;
+  monthlyDiamonds?: number;
+  rank?: number;
+  totalFamilyCoins?: number;
+  familyRank?: number;
+  description?: string;
+  members?: FamilyMember[];
   isUserMember?: boolean;
 }
 
@@ -72,14 +81,111 @@ export interface FanClub {
   isSubscribed?: boolean;
 }
 
+export interface MissionItem {
+  id: string;
+  type: 'DAILY' | 'WEEKLY' | 'MONTHLY';
+  title: string;
+  description: string;
+  rewardCoins: number;
+  rewardXp: number;
+  progress: number;
+  maxProgress: number;
+  completed: boolean;
+  claimed: boolean;
+}
+
+export interface AchievementItem {
+  id: string;
+  category: 'STREAMING' | 'GIFTS' | 'SOCIAL' | 'VIP' | 'GAMES';
+  title: string;
+  description: string;
+  icon: string;
+  rewardDiamonds: number;
+  rewardTitle?: string;
+  progress: number;
+  maxProgress: number;
+  unlocked: boolean;
+  claimed: boolean;
+}
+
+export interface UserCustomizationItem {
+  id: string;
+  category: 'TITLE' | 'FRAME' | 'ENTRANCE_EFFECT' | 'BADGE';
+  name: string;
+  previewIcon: string;
+  description: string;
+  minVipLevel?: number;
+  minUserLevel?: number;
+  isUnlocked: boolean;
+  isEquipped: boolean;
+}
+
+export interface LevelRewardTrack {
+  level: number;
+  category: 'USER' | 'CREATOR' | 'WEALTH' | 'CHARM';
+  rewardTitle: string;
+  rewardCoins: number;
+  rewardDiamonds: number;
+  unlockedFrameOrTitle?: string;
+  claimed: boolean;
+}
+
+export interface VipRoom {
+  id: string;
+  roomName: string;
+  minVipLevel: number;
+  hostName: string;
+  activeViewers: number;
+  coverImage: string;
+  exclusivePerk: string;
+}
+
+export interface ScheduledStream {
+  id: string;
+  title: string;
+  category: string;
+  scheduledTime: string;
+  description: string;
+  ticketPriceCoins: number;
+  isPublished: boolean;
+}
+
+export interface CreatorGoal {
+  id: string;
+  title: string;
+  category: 'FOLLOWERS' | 'DIAMONDS' | 'STREAM_HOURS' | 'GIFTS';
+  currentValue: number;
+  targetValue: number;
+  rewardBadge: string;
+  completed: boolean;
+}
+
+export interface NotificationPreferences {
+  pushEnabled: boolean;
+  emailEnabled: boolean;
+  inAppEnabled: boolean;
+  liveInvitations: boolean;
+  pkInvitations: boolean;
+  giftAlerts: boolean;
+  followerAlerts: boolean;
+  creatorNews: boolean;
+  systemAnnouncements: boolean;
+  securityAlerts: boolean;
+}
+
 export interface NotificationItem {
   id: string;
-  category: 'GIFTS' | 'FOLLOWERS' | 'LIVE_ALERTS' | 'MESSAGES' | 'REWARDS' | 'GAMES' | 'EVENTS' | 'SECURITY';
+  category: 'GIFTS' | 'FOLLOWERS' | 'LIVE_ALERTS' | 'MESSAGES' | 'REWARDS' | 'GAMES' | 'EVENTS' | 'SECURITY' | 'PK_INVITE' | 'LIVE_INVITE' | 'SYSTEM_ANNOUNCEMENT';
   title: string;
   body: string;
   timestamp: string;
   read: boolean;
   actionUrl?: string;
+  inviteDetails?: {
+    roomId?: string;
+    hostName?: string;
+    pkDurationSeconds?: number;
+  };
 }
 
 export interface RedPacket {
@@ -152,12 +258,15 @@ export interface Agency {
   id: string;
   name: string;
   logo: string;
-  founderName: string;
-  totalCreators: number;
-  monthlyGiftsCoins: number;
+  founderName?: string;
+  ownerName?: string;
+  streamersCount?: number;
+  totalCreators?: number;
+  monthlyGiftsCoins?: number;
+  monthlyRevenueUsd?: number;
   commissionRatePercent: number;
-  minMonthlyQuotaCoins: number;
-  verificationBadge: boolean;
+  minMonthlyQuotaCoins?: number;
+  verificationBadge?: boolean | string;
   description: string;
 }
 
