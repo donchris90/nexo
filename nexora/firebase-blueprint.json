@@ -2,7 +2,7 @@
   "entities": {
     "User": {
       "title": "User Profile",
-      "description": "User profile with wealth level, charm level, and balances",
+      "description": "User profile with wealth level, charm level, KYC status, and balances",
       "type": "object",
       "properties": {
         "uid": { "type": "string" },
@@ -16,6 +16,8 @@
         "points": { "type": "number" },
         "xp": { "type": "number" },
         "vipTier": { "type": "string" },
+        "kycStatus": { "type": "string" },
+        "isBanned": { "type": "boolean" },
         "createdAt": { "type": "string" }
       },
       "required": ["uid", "displayName"]
@@ -31,9 +33,42 @@
         "amount": { "type": "number" },
         "currency": { "type": "string" },
         "description": { "type": "string" },
+        "status": { "type": "string" },
+        "relatedUser": { "type": "string" },
         "timestamp": { "type": "string" }
       },
       "required": ["id", "userId", "type", "amount", "currency", "description", "timestamp"]
+    },
+    "WithdrawalRequest": {
+      "title": "Withdrawal Request",
+      "description": "Creator earnings withdrawal request to external gateway",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "amountDiamonds": { "type": "number" },
+        "amountUsd": { "type": "number" },
+        "method": { "type": "string" },
+        "accountDetails": { "type": "string" },
+        "status": { "type": "string" },
+        "requestDate": { "type": "string" }
+      },
+      "required": ["id", "userId", "amountDiamonds", "amountUsd", "method", "accountDetails", "status", "requestDate"]
+    },
+    "RefundRequest": {
+      "title": "Refund Request",
+      "description": "User refund request for faulty or disputed coin transactions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "amountCoins": { "type": "number" },
+        "reason": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "transactionId", "amountCoins", "reason", "status", "createdAt"]
     },
     "Stream": {
       "title": "Live Broadcast Room",
@@ -41,32 +76,104 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "hostName": { "type": "string" },
-        "hostAvatar": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "creatorName": { "type": "string" },
+        "creatorAvatar": { "type": "string" },
         "title": { "type": "string" },
         "category": { "type": "string" },
-        "mode": { "type": "string" },
         "viewerCount": { "type": "number" },
-        "countryFlag": { "type": "string" },
         "status": { "type": "string" },
+        "isLocked": { "type": "boolean" },
+        "slowMode": { "type": "boolean" },
+        "subscribersOnly": { "type": "boolean" },
+        "followersOnly": { "type": "boolean" },
         "createdAt": { "type": "string" }
       },
-      "required": ["id", "hostName", "title", "category", "status"]
+      "required": ["id", "creatorId", "creatorName", "title", "category", "status"]
     },
-    "ChatMessage": {
-      "title": "Chat Message",
-      "description": "Stream chat or direct message",
+    "ModerationSettings": {
+      "title": "Room Moderation State",
+      "description": "Live room moderation controls and member permission lists",
+      "type": "object",
+      "properties": {
+        "streamId": { "type": "string" },
+        "hostId": { "type": "string" },
+        "isRoomLocked": { "type": "boolean" },
+        "isSlowMode": { "type": "boolean" },
+        "subscribersOnly": { "type": "boolean" },
+        "followersOnly": { "type": "boolean" },
+        "pinnedComment": { "type": "string" },
+        "pinnedAnnouncement": { "type": "string" },
+        "mutedUsers": { "type": "string" },
+        "bannedUsers": { "type": "string" },
+        "moderators": { "type": "string" }
+      },
+      "required": ["streamId", "hostId"]
+    },
+    "ReportItem": {
+      "title": "User or Content Report",
+      "description": "User generated violation report",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "reporterId": { "type": "string" },
+        "reporterName": { "type": "string" },
+        "targetId": { "type": "string" },
+        "targetName": { "type": "string" },
+        "streamId": { "type": "string" },
+        "category": { "type": "string" },
+        "reason": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "reporterId", "targetId", "category", "reason", "status", "createdAt"]
+    },
+    "ModeratorLog": {
+      "title": "Moderator Action Log",
+      "description": "Audit record of host/moderator actions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "streamId": { "type": "string" },
+        "moderatorId": { "type": "string" },
+        "action": { "type": "string" },
+        "targetUserId": { "type": "string" },
+        "details": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["id", "streamId", "moderatorId", "action", "timestamp"]
+    },
+    "ChatMessage": {
+      "title": "Chat Message",
+      "description": "Live stream or direct messaging message item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "chatId": { "type": "string" },
         "senderId": { "type": "string" },
         "senderName": { "type": "string" },
         "senderAvatar": { "type": "string" },
         "text": { "type": "string" },
-        "roomId": { "type": "string" },
+        "type": { "type": "string" },
+        "mediaUrl": { "type": "string" },
         "timestamp": { "type": "string" }
       },
-      "required": ["id", "senderId", "senderName", "text", "roomId", "timestamp"]
+      "required": ["id", "chatId", "senderId", "senderName", "text", "timestamp"]
+    },
+    "ChatConversation": {
+      "title": "Chat Conversation",
+      "description": "Direct message thread or group chat",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "isGroup": { "type": "boolean" },
+        "groupName": { "type": "string" },
+        "groupAvatar": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "lastUpdated": { "type": "string" },
+        "lastSenderId": { "type": "string" }
+      },
+      "required": ["id", "lastMessage", "lastUpdated"]
     }
   },
   "firestore": {
@@ -78,13 +185,49 @@
       "schema": { "$ref": "#/entities/WalletTransaction" },
       "description": "Wallet transaction ledger"
     },
+    "/withdrawal_requests/{requestId}": {
+      "schema": { "$ref": "#/entities/WithdrawalRequest" },
+      "description": "Creator cash withdrawal requests"
+    },
+    "/refund_requests/{refundId}": {
+      "schema": { "$ref": "#/entities/RefundRequest" },
+      "description": "User purchase refund requests"
+    },
     "/streams/{streamId}": {
       "schema": { "$ref": "#/entities/Stream" },
       "description": "Live stream rooms"
     },
+    "/moderation_settings/{streamId}": {
+      "schema": { "$ref": "#/entities/ModerationSettings" },
+      "description": "Room moderation rules and access controls"
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/ReportItem" },
+      "description": "Content and abuse reports"
+    },
+    "/moderator_logs/{logId}": {
+      "schema": { "$ref": "#/entities/ModeratorLog" },
+      "description": "Audit logs for moderation actions"
+    },
+    "/chats/{chatId}": {
+      "schema": { "$ref": "#/entities/ChatConversation" },
+      "description": "Direct and group chat threads"
+    },
     "/messages/{messageId}": {
       "schema": { "$ref": "#/entities/ChatMessage" },
-      "description": "Live and direct messages"
+      "description": "Messages inside conversations"
+    },
+    "/social_posts/{postId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Social feed posts and media"
+    },
+    "/families/{familyId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Guilds and family rosters"
+    },
+    "/agencies/{agencyId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Talent agencies and streamer rosters"
     }
   }
 }

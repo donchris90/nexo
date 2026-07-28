@@ -2,12 +2,12 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Default deny
+    // Global default deny
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Helper functions
+    // Common Global Helpers
     function isSignedIn() {
       return request.auth != null;
     }
@@ -16,30 +16,146 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    // Users collection
+    // Users Collection
     match /users/{userId} {
       allow read: if isSignedIn();
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      allow update: if isOwner(userId);
+      allow create, update: if isOwner(userId);
     }
 
-    // Transactions ledger
+    // Transactions Ledger
     match /transactions/{transactionId} {
-      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || request.resource.data.userId == request.auth.uid);
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || 
+        request.resource.data.userId == request.auth.uid
+      );
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
     }
 
-    // Streams collection
-    match /streams/{streamId} {
-      allow read: if true;
-      allow create, update: if isSignedIn();
-      allow delete: if isSignedIn();
+    // Withdrawal Requests
+    match /withdrawal_requests/{requestId} {
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || 
+        request.resource.data.userId == request.auth.uid
+      );
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn();
     }
 
-    // Messages collection
+    // Refund Requests
+    match /refund_requests/{refundId} {
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid || 
+        request.resource.data.userId == request.auth.uid
+      );
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn();
+    }
+
+    // Streams Collection
+    match /streams/{streamId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // Moderation Settings per Stream
+    match /moderation_settings/{streamId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // Abuse & Violation Reports
+    match /reports/{reportId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid;
+      allow update: if isSignedIn();
+    }
+
+    // Moderator Audit Logs
+    match /moderator_logs/{logId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
+
+    // Chats Collection
+    match /chats/{chatId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+    }
+
+    // Messages Collection
     match /messages/{messageId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+      allow update, delete: if isSignedIn() && resource.data.senderId == request.auth.uid;
+    }
+
+    // Typing Indicators
+    match /typing_indicators/{indicatorId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // User Blocks
+    match /user_blocks/{blockId} {
+      allow read, write: if isSignedIn();
+    }
+
+    // User Presence / Last Seen
+    match /user_presence/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isOwner(userId);
+    }
+
+    // PK Battles Collection
+    match /pk_battles/{battleId} {
+      allow read: if true;
+      allow create, update: if isSignedIn();
+    }
+
+    // Social Feed Posts
+    match /social_posts/{postId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // Social Feed Comments
+    match /social_comments/{commentId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // Social Stories
+    match /social_stories/{storyId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // User Follows
+    match /user_follows/{followId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // Families / Guilds
+    match /families/{familyId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // Agencies
+    match /agencies/{agencyId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // Guild Applications
+    match /guild_applications/{appId} {
+      allow read, create, update: if isSignedIn();
+    }
+
+    // Guild PK Battles
+    match /guild_pk_battles/{pkId} {
+      allow read: if true;
+      allow create, update: if isSignedIn();
     }
   }
 }
