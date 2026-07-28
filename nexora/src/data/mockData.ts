@@ -429,3 +429,65 @@ export const MOCK_AVATARS: AIAvatar[] = [
     expressions: ['Smug', 'Cheerful', 'Magic Sparkle', 'Sleepy']
   }
 ];
+
+export const MOCK_WEEKLY_MISSIONS = [
+  { id: 'wm1', type: 'WEEKLY' as const, title: '🔥 Host or Join 5 PK Battles', description: 'Participate in 5 live 1v1 PK battles during the week', rewardCoins: 2500, rewardXp: 1200, progress: 3, maxProgress: 5, completed: false, claimed: false },
+  { id: 'wm2', type: 'WEEKLY' as const, title: '👑 Send 50,000 Coins in Gifts', description: 'Support hosts across party rooms and live concerts', rewardCoins: 5000, rewardXp: 3000, progress: 32000, maxProgress: 50000, completed: false, claimed: false },
+  { id: 'wm3', type: 'WEEKLY' as const, title: '🏆 Win 10 Ludo Matches', description: 'Outplay opponents in the gaming arena', rewardCoins: 3000, rewardXp: 1800, progress: 10, maxProgress: 10, completed: true, claimed: false }
+];
+
+export const MOCK_MONTHLY_MISSIONS = [
+  { id: 'mm1', type: 'MONTHLY' as const, title: '🌌 Reach Wealth Tier Master', description: 'Accumulate total spending to level up Wealth Status', rewardCoins: 15000, rewardXp: 8000, progress: 84000, maxProgress: 100000, completed: false, claimed: false },
+  { id: 'mm2', type: 'MONTHLY' as const, title: '🎙️ Stream 20 Hours Live', description: 'Go live or co-host in 9-guest audio/video party rooms', rewardCoins: 20000, rewardXp: 10000, progress: 14, maxProgress: 20, completed: false, claimed: false }
+];
+
+export const MOCK_ACHIEVEMENTS = [
+  { id: 'ach_1', category: 'VIP' as const, title: ' Crown Sovereign', description: 'Reach VIP Level 5 or higher in Nexora', icon: '👑', rewardDiamonds: 5000, rewardTitle: 'Crown Sovereign', progress: 5, maxProgress: 5, unlocked: true, claimed: false },
+  { id: 'ach_2', category: 'GIFTS' as const, title: '🐉 Dragon Summoner', description: 'Send a Mythic Flying Dragon AR Gift', icon: '🐉', rewardDiamonds: 2500, progress: 1, maxProgress: 1, unlocked: true, claimed: true },
+  { id: 'ach_3', category: 'STREAMING' as const, title: '🔥 Party Legend', description: 'Host a stream with 500+ concurrent viewers', icon: '🔥', rewardDiamonds: 10000, progress: 420, maxProgress: 500, unlocked: false, claimed: false },
+  { id: 'ach_4', category: 'SOCIAL' as const, title: '👥 Guild Founder', description: 'Build a family guild with 30+ active members', icon: '🏰', rewardDiamonds: 3000, progress: 30, maxProgress: 30, unlocked: true, claimed: false }
+];
+
+export const MOCK_CUSTOMIZATIONS = [
+  { id: 'frame_gold', category: 'FRAME' as const, name: '🥇 Gold VIP Avatar Ring', previewIcon: '✨', description: 'Animated glittering gold border around your avatar in chat & seats.', isUnlocked: true, isEquipped: true },
+  { id: 'frame_cyber', category: 'FRAME' as const, name: '⚡ Neon Cyber Pulse Ring', previewIcon: '🌀', description: 'Pulsing cyan energy aura ring.', minVipLevel: 3, isUnlocked: true, isEquipped: false },
+  { id: 'effect_dragon', category: 'ENTRANCE_EFFECT' as const, name: '🐉 Flying Dragon Roar', previewIcon: '🐲', description: 'Global room announcement with 3D dragon entry when joining rooms.', minVipLevel: 5, isUnlocked: true, isEquipped: true },
+  { id: 'title_titan', category: 'TITLE' as const, name: '✨ Universal Titan Title', previewIcon: '👑', description: 'Sparkling badge beside your handle in all rooms.', isUnlocked: true, isEquipped: true },
+  { id: 'badge_vip7', category: 'BADGE' as const, name: '💎 VIP 7 Crown Badge', previewIcon: '🛡️', description: 'Exclusive VIP 7 badge for chat comments and profile.', isUnlocked: true, isEquipped: true }
+];
+
+export const MOCK_LEVEL_REWARDS = [
+  { level: 10, category: 'USER' as const, rewardTitle: 'Bronze Enthusiast', rewardCoins: 1000, rewardDiamonds: 100, unlockedFrameOrTitle: 'Bronze Ring', claimed: true },
+  { level: 20, category: 'USER' as const, rewardTitle: 'Silver Pathfinder', rewardCoins: 5000, rewardDiamonds: 500, unlockedFrameOrTitle: 'Silver Ring', claimed: true },
+  { level: 30, category: 'USER' as const, rewardTitle: 'Gold Sovereign', rewardCoins: 15000, rewardDiamonds: 1500, unlockedFrameOrTitle: 'Gold VIP Frame', claimed: false },
+  { level: 40, category: 'USER' as const, rewardTitle: 'Diamond Overlord', rewardCoins: 50000, rewardDiamonds: 5000, unlockedFrameOrTitle: 'Diamond Aura', claimed: false },
+  { level: 50, category: 'USER' as const, rewardTitle: 'Universal Legend', rewardCoins: 150000, rewardDiamonds: 15000, unlockedFrameOrTitle: 'Universal Crown', claimed: false }
+];
+
+export const MOCK_VIP_ROOMS = [
+  { id: 'vip_room_1', roomName: '👑 Platinum Lounge & High-Rollers Party', minVipLevel: 3, hostName: 'Aria Nova', activeViewers: 142, coverImage: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=400&q=80', exclusivePerk: '2x Coin Drops & Exclusive AR Gift Showers' },
+  { id: 'vip_room_2', roomName: '💎 Crown VIP Diamond Suite', minVipLevel: 5, hostName: 'Alex Rivers', activeViewers: 89, coverImage: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=400&q=80', exclusivePerk: 'Direct Co-Host Seat Access & Private DJ Set' }
+];
+
+export const MOCK_SCHEDULED_STREAMS = [
+  { id: 'sched_1', title: '🚀 Season 9 Grand PK Championship Finals', category: 'PK_BATTLE', scheduledTime: 'Tomorrow at 20:00 UTC', description: 'Live 1v1 finals with $5,000 prize pool and exclusive AR gift drops.', ticketPriceCoins: 100, isPublished: true },
+  { id: 'sched_2', title: '🎵 Acoustic Music & VIP Lounge Q&A', category: 'MUSIC', scheduledTime: 'Aug 02 at 18:00 UTC', description: 'Intimate acoustic session and subscriber request hour.', ticketPriceCoins: 0, isPublished: true }
+];
+
+export const MOCK_CREATOR_GOALS = [
+  { id: 'cg_1', title: '15,000 Followers Milestone', category: 'FOLLOWERS' as const, currentValue: 12400, targetValue: 15000, rewardBadge: '🌟 Golden Creator Badge', completed: false },
+  { id: 'cg_2', title: '100,000 Diamonds Received This Month', category: 'DIAMONDS' as const, currentValue: 64500, targetValue: 100000, rewardBadge: '💎 Diamond Streamer Trophy', completed: false }
+];
+
+export const INITIAL_NOTIFICATION_PREFERENCES = {
+  pushEnabled: true,
+  emailEnabled: true,
+  inAppEnabled: true,
+  liveInvitations: true,
+  pkInvitations: true,
+  giftAlerts: true,
+  followerAlerts: true,
+  creatorNews: true,
+  systemAnnouncements: true,
+  securityAlerts: true
+};
