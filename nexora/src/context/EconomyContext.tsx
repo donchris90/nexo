@@ -288,13 +288,13 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     ];
   });
 
-  // FIREBASE AUTH & FIRESTORE LISTENERS
+  // FIREBASE AUTH & FIRESTORE LISTENERS FOR USER PROFILE AND ECONOMY STATE
   useEffect(() => {
     testConnection();
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user: FirebaseUser | null) => {
       setAuthUser(user);
       if (user) {
-        // Sync user profile with Firestore /users/{uid}
+        // 1. Sync user profile with Firestore /users/{uid}
         const userRef = doc(db, 'users', user.uid);
         const snap = await getDoc(userRef);
         if (snap.exists()) {
@@ -311,6 +311,43 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
             createdAt: new Date().toISOString()
           });
         }
+
+        // 2. Sync economy state (missions, achievements, customizations, scheduled streams, creator goals)
+        const econRef = doc(db, 'user_economy_data', user.uid);
+        const unsubEcon = onSnapshot(econRef, (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data.dailyMissions) setDailyMissions(data.dailyMissions);
+            if (data.weeklyMissions) setWeeklyMissions(data.weeklyMissions);
+            if (data.monthlyMissions) setMonthlyMissions(data.monthlyMissions);
+            if (data.achievements) setAchievements(data.achievements);
+            if (data.customizations) setCustomizations(data.customizations);
+            if (data.levelRewards) setLevelRewards(data.levelRewards);
+            if (data.vipRooms) setVipRooms(data.vipRooms);
+            if (data.scheduledStreams) setScheduledStreams(data.scheduledStreams);
+            if (data.creatorGoals) setCreatorGoals(data.creatorGoals);
+            if (data.notificationPreferences) setNotificationPreferences(data.notificationPreferences);
+          } else {
+            // Seed Firestore with default initial state
+            setDoc(econRef, {
+              dailyMissions,
+              weeklyMissions,
+              monthlyMissions,
+              achievements,
+              customizations,
+              levelRewards,
+              vipRooms,
+              scheduledStreams,
+              creatorGoals,
+              notificationPreferences,
+              updatedAt: new Date().toISOString()
+            }).catch(err => console.warn('Economy initial Firestore seed warning:', err));
+          }
+        }, (err) => {
+          console.warn('Economy Firestore listener notice:', err);
+        });
+
+        return () => unsubEcon();
       }
     });
     return () => unsubscribe();
@@ -612,11 +649,23 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   };
 
+  const persistEconomyState = (updates: Record<string, any>) => {
+    if (auth.currentUser) {
+      const econRef = doc(db, 'user_economy_data', auth.currentUser.uid);
+      setDoc(econRef, {
+        ...updates,
+        updatedAt: new Date().toISOString()
+      }, { merge: true }).catch(err => console.warn('Failed to persist economy state to Firestore:', err));
+    }
+  };
+
   const claimMission = (missionId: string) => {
     // Check Daily
     const dailyTarget = dailyMissions.find(m => m.id === missionId);
     if (dailyTarget && !dailyTarget.claimed && dailyTarget.completed) {
-      setDailyMissions(prev => prev.map(m => m.id === missionId ? { ...m, claimed: true } : m));
+      const updated = dailyMissions.map(m => m.id === missionId ? { ...m, claimed: true } : m);
+      setDailyMissions(updated);
+      persistEconomyState({ dailyMissions: updated });
       setWallet(prev => ({ ...prev, coins: prev.coins + dailyTarget.rewardCoins }));
       addXp(dailyTarget.rewardXp);
       addTransaction({ type: 'REWARD', currency: 'COINS', amount: dailyTarget.rewardCoins, description: `Claimed Daily Mission: ${dailyTarget.title}`, status: 'COMPLETED' });
@@ -626,7 +675,9 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // Check Weekly
     const weeklyTarget = weeklyMissions.find(m => m.id === missionId);
     if (weeklyTarget && !weeklyTarget.claimed && weeklyTarget.completed) {
-      setWeeklyMissions(prev => prev.map(m => m.id === missionId ? { ...m, claimed: true } : m));
+      const updated = weeklyMissions.map(m => m.id === missionId ? { ...m, claimed: true } : m);
+      setWeeklyMissions(updated);
+      persistEconomyState({ weeklyMissions: updated });
       setWallet(prev => ({ ...prev, coins: prev.coins + weeklyTarget.rewardCoins }));
       addXp(weeklyTarget.rewardXp);
       addTransaction({ type: 'REWARD', currency: 'COINS', amount: weeklyTarget.rewardCoins, description: `Claimed Weekly Mission: ${weeklyTarget.title}`, status: 'COMPLETED' });
@@ -636,7 +687,9 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     // Check Monthly
     const monthlyTarget = monthlyMissions.find(m => m.id === missionId);
     if (monthlyTarget && !monthlyTarget.claimed && monthlyTarget.completed) {
-      setMonthlyMissions(prev => prev.map(m => m.id === missionId ? { ...m, claimed: true } : m));
+      const updated = monthlyMissions.map(m => m.id === missionId ? { ...m, claimed: true } : m);
+      setMonthlyMissions(updated);
+      persistEconomyState({ monthlyMissions: updated });
       setWallet(prev => ({ ...prev, coins: prev.coins + monthlyTarget.rewardCoins }));
       addXp(monthlyTarget.rewardXp);
       addTransaction({ type: 'REWARD', currency: 'COINS', amount: monthlyTarget.rewardCoins, description: `Claimed Monthly Mission: ${monthlyTarget.title}`, status: 'COMPLETED' });
@@ -648,7 +701,9 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const ach = achievements.find(a => a.id === achievementId);
     if (!ach || ach.claimed || !ach.unlocked) return;
 
-    setAchievements(prev => prev.map(a => a.id === achievementId ? { ...a, claimed: true } : a));
+    const updated = achievements.map(a => a.id === achievementId ? { ...a, claimed: true } : a);
+    setAchievements(updated);
+    persistEconomyState({ achievements: updated });
     setWallet(prev => ({ ...prev, diamonds: prev.diamonds + ach.rewardDiamonds }));
     addXp(1000);
 
@@ -669,20 +724,23 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const item = customizations.find(c => c.id === customizationId);
     if (!item || !item.isUnlocked) return;
 
-    setCustomizations(prev => prev.map(c => {
+    const updated = customizations.map(c => {
       if (c.category === item.category) {
         return { ...c, isEquipped: c.id === customizationId };
       }
       return c;
-    }));
+    });
+
+    setCustomizations(updated);
+    persistEconomyState({ customizations: updated });
 
     setUserLevel(prev => {
-      const updated = { ...prev };
-      if (item.category === 'FRAME') updated.equippedFrameId = customizationId;
-      if (item.category === 'ENTRANCE_EFFECT') updated.equippedEntranceEffectId = customizationId;
-      if (item.category === 'TITLE') updated.equippedTitleId = customizationId;
-      if (item.category === 'BADGE') updated.equippedVipBadgeId = customizationId;
-      return updated;
+      const updatedUser = { ...prev };
+      if (item.category === 'FRAME') updatedUser.equippedFrameId = customizationId;
+      if (item.category === 'ENTRANCE_EFFECT') updatedUser.equippedEntranceEffectId = customizationId;
+      if (item.category === 'TITLE') updatedUser.equippedTitleId = customizationId;
+      if (item.category === 'BADGE') updatedUser.equippedVipBadgeId = customizationId;
+      return updatedUser;
     });
   };
 
@@ -690,7 +748,9 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const target = levelRewards.find(r => r.level === level && r.category === category);
     if (!target || target.claimed) return;
 
-    setLevelRewards(prev => prev.map(r => (r.level === level && r.category === category) ? { ...r, claimed: true } : r));
+    const updated = levelRewards.map(r => (r.level === level && r.category === category) ? { ...r, claimed: true } : r);
+    setLevelRewards(updated);
+    persistEconomyState({ levelRewards: updated });
 
     setWallet(prev => ({
       ...prev,
@@ -710,7 +770,11 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const updateNotificationPreferences = (prefs: Partial<NotificationPreferences>) => {
-    setNotificationPreferences(prev => ({ ...prev, ...prefs }));
+    setNotificationPreferences(prev => {
+      const updated = { ...prev, ...prefs };
+      persistEconomyState({ notificationPreferences: updated });
+      return updated;
+    });
   };
 
   const addScheduledStream = (streamData: Omit<ScheduledStream, 'id'>) => {
@@ -718,7 +782,9 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ...streamData,
       id: `sched_${Date.now()}`
     };
-    setScheduledStreams(prev => [newStream, ...prev]);
+    const updated = [newStream, ...scheduledStreams];
+    setScheduledStreams(updated);
+    persistEconomyState({ scheduledStreams: updated });
 
     triggerPushNotification('📅 Stream Scheduled!', `Your live stream "${newStream.title}" is published for ${newStream.scheduledTime}.`);
   };
