@@ -11,7 +11,10 @@ import {
   where, 
   limit, 
   onSnapshot, 
-  serverTimestamp 
+  serverTimestamp,
+  QuerySnapshot,
+  DocumentData,
+  FirestoreError 
 } from 'firebase/firestore';
 
 export interface SocialPost {
@@ -115,14 +118,14 @@ class SocialFeedService {
       limit(postLimit)
     );
 
-    return onSnapshot(q, (snapshot) => {
+    return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
       const posts: SocialPost[] = [];
       snapshot.forEach((docSnap) => {
         posts.push({ id: docSnap.id, ...docSnap.data() } as SocialPost);
       });
       posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       callback(posts);
-    }, (err) => console.warn('Feed subscription warning:', err));
+    }, (err: FirestoreError) => console.warn('Feed subscription warning:', err));
   }
 
   /**

@@ -12,7 +12,10 @@ import {
   orderBy, 
   limit, 
   onSnapshot, 
-  serverTimestamp 
+  serverTimestamp,
+  DocumentSnapshot,
+  DocumentData,
+  FirestoreError
 } from 'firebase/firestore';
 
 export interface RoomModerationState {
@@ -143,13 +146,13 @@ class ModerationService {
    */
   public subscribeToModeration(streamId: string, callback: (state: RoomModerationState | null) => void) {
     const docRef = doc(db, this.moderationCollection, streamId);
-    return onSnapshot(docRef, (snapshot) => {
+    return onSnapshot(docRef, (snapshot: DocumentSnapshot<DocumentData>) => {
       if (snapshot.exists()) {
         callback(snapshot.data() as RoomModerationState);
       } else {
         callback(null);
       }
-    }, (err) => {
+    }, (err: FirestoreError) => {
       console.warn('Moderation subscription warning:', err);
     });
   }

@@ -11,7 +11,10 @@ import {
   where, 
   limit, 
   onSnapshot, 
-  serverTimestamp 
+  serverTimestamp,
+  QuerySnapshot,
+  DocumentData,
+  FirestoreError 
 } from 'firebase/firestore';
 
 export interface FamilyDoc {
@@ -178,13 +181,13 @@ class GuildAgencyService {
    */
   public subscribeToFamilies(callback: (families: FamilyDoc[]) => void) {
     const q = query(collection(db, this.familiesCollection), limit(30));
-    return onSnapshot(q, (snapshot) => {
+    return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
       const list: FamilyDoc[] = [];
       snapshot.forEach(docSnap => {
         list.push({ id: docSnap.id, ...docSnap.data() } as FamilyDoc);
       });
       callback(list);
-    }, (err) => console.warn('Families sub warning:', err));
+    }, (err: FirestoreError) => console.warn('Families sub warning:', err));
   }
 
   /**
@@ -192,13 +195,13 @@ class GuildAgencyService {
    */
   public subscribeToAgencies(callback: (agencies: AgencyDoc[]) => void) {
     const q = query(collection(db, this.agenciesCollection), limit(30));
-    return onSnapshot(q, (snapshot) => {
+    return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
       const list: AgencyDoc[] = [];
       snapshot.forEach(docSnap => {
         list.push({ id: docSnap.id, ...docSnap.data() } as AgencyDoc);
       });
       callback(list);
-    }, (err) => console.warn('Agencies sub warning:', err));
+    }, (err: FirestoreError) => console.warn('Agencies sub warning:', err));
   }
 }
 

@@ -1,4 +1,5 @@
 import { db } from '../lib/firebase';
+import { apiFetch } from '../lib/apiConfig';
 import { 
   collection, 
   addDoc, 
@@ -78,7 +79,7 @@ class StripeProvider implements IPaymentProvider {
 
   async processPayment(userId: string, amountUsd: number, coins: number) {
     try {
-      const res = await fetch('/api/payments/stripe/create-intent', {
+      const res = await apiFetch('/api/payments/stripe/create-intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, amountUsd, coins })
@@ -108,7 +109,7 @@ class StripeProvider implements IPaymentProvider {
 
   async processPayout(payout: WithdrawalRequestDoc) {
     try {
-      const res = await fetch('/api/payments/stripe/payout', {
+      const res = await apiFetch('/api/payments/stripe/payout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -140,29 +141,50 @@ class PayPalProvider implements IPaymentProvider {
 
   async processPayment(userId: string, amountUsd: number, coins: number) {
     try {
-      const res = await fetch('/api/payments/paypal/create-order', {
+      // 1. Create order
+      const createRes = await apiFetch('/api/payments/paypal/create-order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, amountUsd, coins })
       });
-      const data = await res.json();
-      if (res.ok && data.status === 'SUCCESS') {
+      const createData = await createRes.json();
+      if (!createRes.ok || createData.status !== 'SUCCESS') {
         return {
-          success: true,
-          transactionId: data.orderId || `paypal_tx_${Date.now()}`,
-          message: data.message || `PayPal payment of $${amountUsd} created.`
+          success: false,
+          transactionId: '',
+          message: createData.error || 'PayPal order creation failed'
         };
       }
+
+      const orderId = createData.orderId;
+
+      // 2. Capture order
+      const captureRes = await apiFetch('/api/payments/paypal/capture-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId, userId, coins })
+      });
+      const captureData = await captureRes.json();
+
+      if (captureRes.ok && captureData.status === 'SUCCESS') {
+        return {
+          success: true,
+          transactionId: captureData.captureId || orderId,
+          message: captureData.message || `PayPal order ${orderId} captured successfully.`
+        };
+      }
+
       return {
         success: false,
-        transactionId: '',
-        message: 'PayPal payment failed'
+        transactionId: orderId,
+        message: captureData.error || 'PayPal order capture failed'
       };
     } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'PayPal connection error';
       return {
         success: false,
         transactionId: '',
-        message: 'PayPal server endpoint unavailable'
+        message: `PayPal connection issue: ${errorMsg}`
       };
     }
   }
@@ -178,13 +200,37 @@ class PayPalProvider implements IPaymentProvider {
 
 class RazorpayProvider implements IPaymentProvider {
   name: PaymentMethod = 'RAZORPAY';
-  async processPayment(_userId: string, amountUsd: number, _coins: number) {
-    return {
-      success: true,
-      transactionId: `rzp_pay_${Date.now()}`,
-      message: `Razorpay payment of $${amountUsd} processed successfully.`
-    };
+
+  async processPayment(userId: string, amountUsd: number, coins: number) {
+    try {
+      const res = await apiFetch('/api/payments/razorpay/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, amountUsd, coins })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'SUCCESS') {
+        return {
+          success: true,
+          transactionId: data.orderId || `rzp_ord_${Date.now()}`,
+          message: data.message || `Razorpay order ${data.orderId} created successfully.`
+        };
+      }
+      return {
+        success: false,
+        transactionId: '',
+        message: data.error || 'Razorpay order creation failed'
+      };
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Razorpay connection error';
+      return {
+        success: false,
+        transactionId: '',
+        message: `Razorpay server endpoint unavailable: ${errorMsg}`
+      };
+    }
   }
+
   async processPayout(payout: WithdrawalRequestDoc) {
     return {
       success: true,
@@ -196,13 +242,32 @@ class RazorpayProvider implements IPaymentProvider {
 
 class CryptoProvider implements IPaymentProvider {
   name: PaymentMethod = 'CRYPTO';
-  async processPayment(_userId: string, _amountUsd: number, _coins: number) {
+
+  async processPayment(userId: string, amountUsd: number, coins: number) {
+    const depRef = `crypto_dep_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    try {
+      await addDoc(collection(db, 'manual_deposit_requests'), {
+        userId,
+        method: 'CRYPTO',
+        amountUsd,
+        coins,
+        depositRef: depRef,
+        status: 'PENDING',
+        createdAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.warn('Failed to store manual crypto deposit record:', err);
+    }
+
     return {
       success: true,
-      transactionId: `0x${Math.random().toString(16).substring(2, 10)}...`,
-      message: `Crypto (USDT/TRC20) deposit confirmed.`
+      status: 'PENDING',
+      requiresAdminReview: true,
+      transactionId: depRef,
+      message: `Crypto (USDT) deposit of $${amountUsd} submitted and pending manual blockchain review. Coins will be credited upon verification.`
     };
   }
+
   async processPayout(payout: WithdrawalRequestDoc) {
     return {
       success: true,
@@ -214,13 +279,32 @@ class CryptoProvider implements IPaymentProvider {
 
 class BankWireProvider implements IPaymentProvider {
   name: PaymentMethod = 'BANK_WIRE';
-  async processPayment(_userId: string, _amountUsd: number, _coins: number) {
+
+  async processPayment(userId: string, amountUsd: number, coins: number) {
+    const depRef = `wire_dep_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    try {
+      await addDoc(collection(db, 'manual_deposit_requests'), {
+        userId,
+        method: 'BANK_WIRE',
+        amountUsd,
+        coins,
+        depositRef: depRef,
+        status: 'PENDING',
+        createdAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.warn('Failed to store manual wire deposit record:', err);
+    }
+
     return {
       success: true,
-      transactionId: `wire_dep_${Date.now()}`,
-      message: `Bank Wire payment confirmed.`
+      status: 'PENDING',
+      requiresAdminReview: true,
+      transactionId: depRef,
+      message: `Bank Wire deposit of $${amountUsd} submitted and pending compliance verification. Coins will be credited upon bank receipt.`
     };
   }
+
   async processPayout(payout: WithdrawalRequestDoc) {
     return {
       success: true,
@@ -250,7 +334,7 @@ export class PaymentGatewayService {
     userId: string,
     pkg: PaymentPackage,
     method: PaymentMethod
-  ): Promise<{ success: boolean; message: string; transactionId?: string }> {
+  ): Promise<{ success: boolean; message: string; transactionId?: string; status?: string }> {
     const provider = this.providers.get(method) || this.providers.get('STRIPE')!;
     
     // Process Gateway transaction
@@ -258,18 +342,27 @@ export class PaymentGatewayService {
     
     if (res.success) {
       const totalCoins = pkg.coins + (pkg.bonusCoins || 0);
+      const isPending = (res as any).status === 'PENDING';
+      
       // Record immutable double-entry ledger entry in WalletService
       await walletService.appendLedgerEntry({
         userId,
         type: 'PURCHASE',
         amount: totalCoins,
         currency: 'COINS',
-        description: `Recharged ${totalCoins.toLocaleString()} Coins via ${method} (${res.transactionId})`,
+        description: isPending 
+          ? `Pending Deposit of ${totalCoins.toLocaleString()} Coins via ${method} (${res.transactionId})`
+          : `Recharged ${totalCoins.toLocaleString()} Coins via ${method} (${res.transactionId})`,
         timestamp: new Date().toISOString(),
-        status: 'COMPLETED'
+        status: isPending ? 'PENDING' : 'COMPLETED'
       });
 
-      return { success: true, message: res.message, transactionId: res.transactionId };
+      return { 
+        success: true, 
+        message: res.message, 
+        transactionId: res.transactionId,
+        status: isPending ? 'PENDING' : 'COMPLETED'
+      };
     }
 
     return { success: false, message: 'Payment gateway transaction failed.' };
@@ -388,6 +481,59 @@ export class PaymentGatewayService {
     } catch (err: unknown) {
       const errorMsg = err instanceof Error ? err.message : 'Error submitting refund';
       return { success: false, message: errorMsg };
+    }
+  }
+
+  public async approveRefund(rDoc: RefundRequestDoc, adminId: string) {
+    try {
+      if (rDoc.id) {
+        const ref = doc(db, this.refundsCollection, rDoc.id);
+        await updateDoc(ref, {
+          status: 'APPROVED',
+          processedAt: new Date().toISOString()
+        });
+      }
+      return { success: true, message: 'Refund approved' };
+    } catch (err: unknown) {
+      return { success: false, message: 'Failed to approve refund' };
+    }
+  }
+
+  public async getWithdrawalRequests(): Promise<WithdrawalRequestDoc[]> {
+    try {
+      const q = query(collection(db, this.withdrawalsCollection), orderBy('createdAt', 'desc'), limit(50));
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...d.data() } as WithdrawalRequestDoc));
+    } catch {
+      return [];
+    }
+  }
+
+  public async getRefundRequests(): Promise<RefundRequestDoc[]> {
+    try {
+      const q = query(collection(db, this.refundsCollection), orderBy('createdAt', 'desc'), limit(50));
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...d.data() } as RefundRequestDoc));
+    } catch {
+      return [];
+    }
+  }
+
+  public async approveAndProcessWithdrawal(requestId: string, wDoc: WithdrawalRequestDoc, adminId: string) {
+    return this.approveWithdrawal(requestId, adminId);
+  }
+
+  public async rejectWithdrawal(requestId: string, reason: string) {
+    try {
+      const ref = doc(db, this.withdrawalsCollection, requestId);
+      await updateDoc(ref, {
+        status: 'REJECTED',
+        fraudReason: reason,
+        processedAt: new Date().toISOString()
+      });
+      return { success: true, message: 'Withdrawal rejected' };
+    } catch (err: unknown) {
+      return { success: false, message: 'Failed to reject withdrawal' };
     }
   }
 

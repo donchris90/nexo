@@ -1,5 +1,5 @@
 import { db } from '../lib/firebase';
-import { doc, setDoc, getDoc, updateDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, onSnapshot, serverTimestamp, DocumentSnapshot, DocumentData, FirestoreError } from 'firebase/firestore';
 import { walletService } from './WalletService';
 
 export interface GameSession {
@@ -118,12 +118,14 @@ export class GameService {
    */
   public subscribeToGame(sessionId: string, callback: (session: GameSession | null) => void) {
     const docRef = doc(db, this.collectionName, sessionId);
-    return onSnapshot(docRef, (snap) => {
+    return onSnapshot(docRef, (snap: DocumentSnapshot<DocumentData>) => {
       if (snap.exists()) {
         callback({ id: snap.id, ...snap.data() } as GameSession);
       } else {
         callback(null);
       }
+    }, (err: FirestoreError) => {
+      console.warn('Game subscription warning:', err);
     });
   }
 }

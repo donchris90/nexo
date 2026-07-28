@@ -13,7 +13,10 @@ import {
   orderBy, 
   limit, 
   onSnapshot, 
-  serverTimestamp 
+  serverTimestamp,
+  QuerySnapshot,
+  DocumentData,
+  FirestoreError
 } from 'firebase/firestore';
 
 export type MessageType = 'TEXT' | 'IMAGE' | 'VOICE_NOTE' | 'VIDEO' | 'DOCUMENT' | 'GIF' | 'GIFT_NOTIFICATION';
@@ -129,7 +132,7 @@ export class ChatService {
       limit(messageLimit)
     );
 
-    return onSnapshot(q, (snapshot) => {
+    return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
       const messages: ChatMessage[] = [];
       snapshot.forEach((docSnap) => {
         messages.push({ id: docSnap.id, ...docSnap.data() } as ChatMessage);
@@ -137,6 +140,8 @@ export class ChatService {
       // Sort chronologically
       messages.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
       callback(messages);
+    }, (err: FirestoreError) => {
+      console.warn('Chat subscription warning:', err);
     });
   }
 

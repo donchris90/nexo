@@ -14,7 +14,10 @@ import {
   getDoc, 
   onSnapshot, 
   increment, 
-  serverTimestamp 
+  serverTimestamp,
+  DocumentSnapshot,
+  DocumentData,
+  FirestoreError 
 } from 'firebase/firestore';
 
 export type RemoteMediaType = 'audio' | 'video' | 'datachannel';
@@ -469,13 +472,13 @@ export class AgoraService {
    */
   public subscribeToStreamMetadata(channelName: string, callback: (metadata: StreamMetadata | null) => void) {
     const streamRef = doc(db, 'streams', channelName);
-    return onSnapshot(streamRef, (snapshot) => {
+    return onSnapshot(streamRef, (snapshot: DocumentSnapshot<DocumentData>) => {
       if (snapshot.exists()) {
         callback({ id: snapshot.id, ...snapshot.data() } as StreamMetadata);
       } else {
         callback(null);
       }
-    }, (err) => {
+    }, (err: FirestoreError) => {
       console.warn('[AgoraService] Stream metadata subscription warning:', err);
     });
   }

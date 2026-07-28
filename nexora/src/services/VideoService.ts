@@ -14,7 +14,10 @@ import {
   limit, 
   onSnapshot, 
   increment, 
-  serverTimestamp 
+  serverTimestamp,
+  QuerySnapshot,
+  DocumentData,
+  FirestoreError 
 } from 'firebase/firestore';
 import { 
   VideoItem, 
@@ -169,14 +172,14 @@ export class VideoService {
         orderBy('createdAt', 'desc'),
         limit(50)
       );
-      return onSnapshot(q, (snapshot) => {
+      return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
         if (snapshot.empty) {
           callback(SEEDED_VIDEOS);
         } else {
           const videos = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as VideoItem));
           callback(videos);
         }
-      }, (err) => {
+      }, (err: FirestoreError) => {
         console.warn('[VideoService] Video subscription warning:', err);
         callback(SEEDED_VIDEOS);
       });

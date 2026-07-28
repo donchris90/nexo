@@ -6,7 +6,10 @@ import {
   getDoc, 
   updateDoc, 
   onSnapshot, 
-  serverTimestamp 
+  serverTimestamp,
+  DocumentSnapshot,
+  DocumentData,
+  FirestoreError 
 } from 'firebase/firestore';
 import { walletService } from './WalletService';
 
@@ -156,12 +159,14 @@ export class PkBattleService {
    */
   public subscribeToBattle(battleId: string, callback: (match: PkBattleMatch | null) => void) {
     const battleRef = doc(db, this.collectionName, battleId);
-    return onSnapshot(battleRef, (snapshot) => {
+    return onSnapshot(battleRef, (snapshot: DocumentSnapshot<DocumentData>) => {
       if (snapshot.exists()) {
         callback({ id: snapshot.id, ...snapshot.data() } as PkBattleMatch);
       } else {
         callback(null);
       }
+    }, (err: FirestoreError) => {
+      console.warn('PK Battle subscription warning:', err);
     });
   }
 }

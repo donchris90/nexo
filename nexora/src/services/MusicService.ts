@@ -14,7 +14,10 @@ import {
   limit, 
   onSnapshot, 
   increment, 
-  serverTimestamp 
+  serverTimestamp,
+  QuerySnapshot,
+  DocumentData,
+  FirestoreError 
 } from 'firebase/firestore';
 import { 
   MusicTrack, 
@@ -165,14 +168,14 @@ export class MusicService {
         orderBy('createdAt', 'desc'),
         limit(50)
       );
-      return onSnapshot(q, (snapshot) => {
+      return onSnapshot(q, (snapshot: QuerySnapshot<DocumentData>) => {
         if (snapshot.empty) {
           callback(SEEDED_MUSIC_TRACKS);
         } else {
           const tracks = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MusicTrack));
           callback(tracks);
         }
-      }, (err) => {
+      }, (err: FirestoreError) => {
         console.warn('[MusicService] Track subscription warning:', err);
         callback(SEEDED_MUSIC_TRACKS);
       });
