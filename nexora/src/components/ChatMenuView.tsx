@@ -296,6 +296,44 @@ export const ChatMenuView: React.FC = () => {
 
             {/* MESSAGE INPUT BOX */}
             <form onSubmit={handleSend} className="flex items-center gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  const voiceMsg = {
+                    id: `m_vn_${Date.now()}`,
+                    sender: 'me' as const,
+                    text: '🎤 Voice Note (0:14)',
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  };
+                  setChatThreads(prev => ({
+                    ...prev,
+                    [selectedChatId]: [...(prev[selectedChatId] || []), voiceMsg]
+                  }));
+                }}
+                className="p-2.5 bg-slate-800 hover:bg-slate-700 text-amber-400 rounded-2xl border border-slate-700"
+                title="Send Voice Note"
+              >
+                🎤
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const imgMsg = {
+                    id: `m_img_${Date.now()}`,
+                    sender: 'me' as const,
+                    text: '📷 Shared photo',
+                    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  };
+                  setChatThreads(prev => ({
+                    ...prev,
+                    [selectedChatId]: [...(prev[selectedChatId] || []), imgMsg]
+                  }));
+                }}
+                className="p-2.5 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded-2xl border border-slate-700"
+                title="Send Image / Document"
+              >
+                📷
+              </button>
               <input
                 type="text"
                 placeholder={`Message ${currentConv.name}...`}
@@ -339,7 +377,7 @@ export const ChatMenuView: React.FC = () => {
                       <span className="px-2 py-0.2 bg-pink-500 text-white text-[9px] font-black rounded-full uppercase">NEW</span>
                     )}
                   </div>
-                  <p className="text-slate-400">{notif.message}</p>
+                  <p className="text-slate-400">{notif.body}</p>
                   <span className="text-[10px] text-slate-500 font-mono block">{notif.timestamp}</span>
                 </div>
               </div>

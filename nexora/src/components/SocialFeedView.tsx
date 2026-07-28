@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useEconomy } from '../context/EconomyContext';
 import { SocialPost, SocialStory, FriendRequest } from '../types';
+import { socialFeedService } from '../services/SocialFeedService';
 import { 
   Heart, 
   MessageCircle, 
@@ -22,7 +23,8 @@ import {
   Volume2, 
   Music,
   Check,
-  X
+  X,
+  Bookmark
 } from 'lucide-react';
 
 export const SocialFeedView: React.FC = () => {
@@ -47,14 +49,6 @@ export const SocialFeedView: React.FC = () => {
       mediaUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=400&q=80',
       timestamp: '1h ago',
       viewed: false
-    },
-    {
-      id: 'st_3',
-      authorName: 'Elena Rostova',
-      authorAvatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=200&q=80',
-      mediaUrl: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=400&q=80',
-      timestamp: '3h ago',
-      viewed: true
     }
   ]);
 
@@ -67,45 +61,45 @@ export const SocialFeedView: React.FC = () => {
       authorLevel: 58,
       authorBadge: 'TOP HOST',
       location: '🇺🇸 Los Angeles',
-      content: 'Who is joining our 9-Seat Party Room tonight? Sending 10x Dragons to the top seat gifter! 🔥✨ #PoppoVibes #NexoraLive',
+      content: 'Who is joining our 9-Seat Party Room tonight? Sending 10x Dragons to the top seat gifter! 🔥✨ #PoppoVibes #NexoraLive @alex_rivers',
       mediaUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=800&q=80',
       likesCount: 1420,
       commentsCount: 238,
       giftsCoinsCount: 48500,
       timestamp: '15 mins ago',
       category: 'FOR_YOU'
-    },
-    {
-      id: 'post_2',
-      authorName: 'DJ Kairos',
-      authorAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
-      authorLevel: 51,
-      authorBadge: 'PRO MUSICIAN',
-      location: '🇯🇵 Tokyo',
-      content: '🎙️ Check out this 15-second synth preview for tonight’s PK battle set. Tell me what track you want to hear!',
-      voiceNoteUrl: 'https://actions.google.com/sounds/v1/ambiences/outdoor_synth.ogg',
-      voiceNoteDuration: '0:28',
-      likesCount: 980,
-      commentsCount: 112,
-      giftsCoinsCount: 19200,
-      timestamp: '1 hour ago',
-      category: 'VOICE_NOTES'
-    },
-    {
-      id: 'post_3',
-      authorName: 'CyberKnight',
-      authorAvatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=200&q=80',
-      authorLevel: 31,
-      authorBadge: 'GAMING CHAMP',
-      location: '🇩🇪 Berlin',
-      content: 'Just won 5,000 Points in the Nexora Ludo PvP Arena! Challenging anyone to a 10,000 point match! 🎲🏆',
-      likesCount: 650,
-      commentsCount: 84,
-      giftsCoinsCount: 8500,
-      timestamp: '3 hours ago',
-      category: 'TRENDING'
     }
   ]);
+
+  // Real-time Firestore subscription
+  useEffect(() => {
+    const unsub = socialFeedService.subscribeToFeed((livePosts) => {
+      if (livePosts && livePosts.length > 0) {
+        // Map Firestore posts to SocialPost interface
+        const mapped: SocialPost[] = livePosts.map(lp => ({
+          id: lp.id!,
+          authorName: lp.authorName,
+          authorAvatar: lp.authorAvatar,
+          authorLevel: 18,
+          authorBadge: 'CREATOR',
+          location: '🌐 Global Feed',
+          content: lp.content,
+          mediaUrl: lp.mediaUrl,
+          likesCount: lp.likeCount,
+          commentsCount: lp.commentCount,
+          giftsCoinsCount: 0,
+          timestamp: lp.createdAt ? new Date(lp.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now',
+          category: 'FOR_YOU',
+          isLiked: lp.likedBy?.includes('me')
+        }));
+        setPosts(mapped);
+      }
+    });
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, []);
 
   // Friend Requests
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([
@@ -115,14 +109,6 @@ export const SocialFeedView: React.FC = () => {
       userAvatar: 'https://images.unsplash.com/photo-1527980965255-d3b416303d12?auto=format&fit=crop&w=150&q=80',
       userLevel: 39,
       mutualFriends: 14,
-      status: 'PENDING'
-    },
-    {
-      id: 'fr_2',
-      userName: 'Luna_StarStream',
-      userAvatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80',
-      userLevel: 28,
-      mutualFriends: 8,
       status: 'PENDING'
     }
   ]);
@@ -134,13 +120,14 @@ export const SocialFeedView: React.FC = () => {
 
   // Post Like Handler
   const handleLike = (postId: string) => {
+    socialFeedService.toggleLikePost(postId, 'me');
     setPosts(prev => prev.map(p => {
       if (p.id === postId) {
         const isLiked = !p.isLiked;
         return {
           ...p,
           isLiked,
-          likesCount: isLiked ? p.likesCount + 1 : p.likesCount - 1
+          likesCount: isLiked ? p.likesCount + 1 : Math.max(0, p.likesCount - 1)
         };
       }
       return p;
@@ -176,28 +163,19 @@ export const SocialFeedView: React.FC = () => {
   };
 
   // Create Post
-  const handleCreatePost = (e: React.FormEvent) => {
+  const handleCreatePost = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPostText.trim() && !hasVoiceNote) return;
 
-    const newPost: SocialPost = {
-      id: `post_${Date.now()}`,
-      authorName: 'Alex Rivers (You)',
+    await socialFeedService.createPost({
+      authorId: 'me',
+      authorName: 'Alex Rivers',
       authorAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-      authorLevel: 18,
-      authorBadge: 'GOLD VIP',
-      location: '🌐 Global Feed',
       content: newPostText,
-      voiceNoteUrl: hasVoiceNote ? 'https://actions.google.com/sounds/v1/ambiences/outdoor_synth.ogg' : undefined,
-      voiceNoteDuration: hasVoiceNote ? '0:15' : undefined,
-      likesCount: 1,
-      commentsCount: 0,
-      giftsCoinsCount: 0,
-      timestamp: 'Just now',
-      category: activeTab === 'REELS' ? 'REELS' : 'FOR_YOU'
-    };
+      mediaType: 'IMAGE',
+      mediaUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=800&q=80'
+    });
 
-    setPosts(prev => [newPost, ...prev]);
     setNewPostText('');
     setHasVoiceNote(false);
     addXp(100);

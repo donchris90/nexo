@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useEconomy } from '../context/EconomyContext';
 import { Agency } from '../types';
+import { guildAgencyService, AgencyDoc } from '../services/GuildAgencyService';
 import { 
   Building2, 
   ShieldCheck, 
@@ -22,7 +23,8 @@ import {
   Download,
   Percent,
   Lock,
-  Search
+  Search,
+  Plus
 } from 'lucide-react';
 
 interface RecruitedHost {
@@ -44,6 +46,86 @@ export const AgenciesView: React.FC = () => {
   const [selectedAgency, setSelectedAgency] = useState<Agency | null>(null);
   const [appliedAgencyId, setAppliedAgencyId] = useState<string | null>('ag_1');
   const [calcGiftAmount, setCalcGiftAmount] = useState<number>(100000);
+
+  // Firestore Agencies List
+  const [agenciesList, setAgenciesList] = useState<Agency[]>([
+    {
+      id: 'ag_1',
+      name: 'StarLight Talent Agency',
+      logo: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+      ownerName: 'Victoria Sterling',
+      streamersCount: 240,
+      monthlyRevenueUsd: 145000,
+      commissionRatePercent: 12,
+      verificationBadge: 'OFFICIAL PARTNER',
+      description: 'Global Top-Tier Host Recruitment & Training Agency with 24/7 dedicated room managers and weekly coin incentives.'
+    },
+    {
+      id: 'ag_2',
+      name: 'Nexus Creators Guild',
+      logo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
+      ownerName: 'Marcus Vance',
+      streamersCount: 185,
+      monthlyRevenueUsd: 98000,
+      commissionRatePercent: 15,
+      verificationBadge: 'VERIFIED AGENCY',
+      description: 'Specializing in Gaming, Music Producers, and High-Volume PK Battle Host Growth.'
+    }
+  ]);
+
+  // Create Agency state
+  const [showCreateAgencyModal, setShowCreateAgencyModal] = useState(false);
+  const [newAgencyName, setNewAgencyName] = useState('');
+  const [newAgencyCommission, setNewAgencyCommission] = useState(15);
+  const [newAgencyDesc, setNewAgencyDesc] = useState('');
+
+  // Firestore Subscription
+  useEffect(() => {
+    const unsub = guildAgencyService.subscribeToAgencies((liveAgencies) => {
+      if (liveAgencies && liveAgencies.length > 0) {
+        const mapped: Agency[] = liveAgencies.map(a => ({
+          id: a.id!,
+          name: a.name,
+          logo: a.logo || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
+          ownerName: a.ownerName,
+          streamersCount: a.streamersCount,
+          monthlyRevenueUsd: a.monthlyRevenueUsd,
+          commissionRatePercent: a.commissionRatePercent,
+          verificationBadge: a.verificationBadge,
+          description: a.description
+        }));
+        setAgenciesList(mapped);
+      }
+    });
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, []);
+
+  const handleCreateAgency = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAgencyName.trim()) return;
+
+    await guildAgencyService.createAgency({
+      name: newAgencyName,
+      logo: 'https://images.unsplash.com/photo-1563089145-599997674d42?auto=format&fit=crop&w=200&q=80',
+      ownerId: 'me',
+      ownerName: 'Alex Rivers',
+      commissionRatePercent: newAgencyCommission,
+      description: newAgencyDesc || 'Verified Global Agency'
+    });
+
+    setShowCreateAgencyModal(false);
+    setNewAgencyName('');
+    alert('Agency registered successfully!');
+  };
+
+  const handleApplyToAgency = async (agencyId: string) => {
+    await guildAgencyService.submitApplication('AGENCY', agencyId, 'me', 'Alex Rivers', 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80');
+    setAppliedAgencyId(agencyId);
+    alert('Application submitted to Agency Owner for review!');
+  };
 
   // Agency Manager Login Credentials state
   const [isAgencyLoggedIn, setIsAgencyLoggedIn] = useState(false);
@@ -92,46 +174,6 @@ export const AgenciesView: React.FC = () => {
     }
   ]);
 
-  // Top Agencies List
-  const [agencies] = useState<Agency[]>([
-    {
-      id: 'ag_1',
-      name: 'StarLight Talent Agency',
-      logo: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
-      founderName: 'Aria Nova',
-      totalCreators: 480,
-      monthlyGiftsCoins: 24500000,
-      commissionRatePercent: 12,
-      minMonthlyQuotaCoins: 50000,
-      verificationBadge: true,
-      description: 'The #1 premier live streaming agency. We provide 24/7 host training, banner promotion, and monthly cash bonuses.'
-    },
-    {
-      id: 'ag_2',
-      name: 'Empire Creators Guild',
-      logo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=200&q=80',
-      founderName: 'DJ Kairos',
-      totalCreators: 320,
-      monthlyGiftsCoins: 18200000,
-      commissionRatePercent: 10,
-      minMonthlyQuotaCoins: 30000,
-      verificationBadge: true,
-      description: 'Specializing in music streams, podcasts, and 9-seat party rooms. Direct manager support and instant payouts.'
-    },
-    {
-      id: 'ag_3',
-      name: 'Cyber Gaming & PK League',
-      logo: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=200&q=80',
-      founderName: 'CyberKnight',
-      totalCreators: 210,
-      monthlyGiftsCoins: 12900000,
-      commissionRatePercent: 15,
-      minMonthlyQuotaCoins: 20000,
-      verificationBadge: false,
-      description: 'The ultimate esports and PK battle guild. Tournament prize pools and weekly Ludo PvP bonuses for top players.'
-    }
-  ]);
-
   // Handle Host Invite
   const handleInviteHost = (e: React.FormEvent) => {
     e.preventDefault();
@@ -154,9 +196,8 @@ export const AgenciesView: React.FC = () => {
   };
 
   const handleApply = (agencyId: string) => {
-    setAppliedAgencyId(agencyId);
+    handleApplyToAgency(agencyId);
     addXp(150);
-    alert('Application submitted! The agency manager will review your stream stats.');
   };
 
   // Commission breakdown calculation
@@ -212,8 +253,20 @@ export const AgenciesView: React.FC = () => {
       {/* VIEW 1: EXPLORE & JOIN AGENCIES */}
       {activeTab === 'EXPLORE' && (
         <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h3 className="font-extrabold text-sm text-slate-100 flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-amber-400" /> Top Partnered Talent Agencies
+            </h3>
+            <button
+              onClick={() => setShowCreateAgencyModal(true)}
+              className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-xs rounded-xl shadow-lg flex items-center gap-1.5"
+            >
+              <Plus className="w-4 h-4" /> Register New Agency
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {agencies.map((ag) => {
+            {agenciesList.map((ag) => {
               const isApplied = appliedAgencyId === ag.id;
               return (
                 <div key={ag.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 shadow-xl relative overflow-hidden group hover:border-slate-700 transition-all">
@@ -232,7 +285,7 @@ export const AgenciesView: React.FC = () => {
                     />
                     <div>
                       <h3 className="font-extrabold text-sm text-slate-100">{ag.name}</h3>
-                      <p className="text-[11px] text-slate-400">Founder: {ag.founderName}</p>
+                      <p className="text-[11px] text-slate-400">Owner: {ag.ownerName || 'Victoria Sterling'}</p>
                     </div>
                   </div>
 
@@ -240,20 +293,20 @@ export const AgenciesView: React.FC = () => {
 
                   <div className="grid grid-cols-2 gap-2 bg-slate-950 p-3 rounded-2xl border border-slate-800/80 text-xs">
                     <div>
-                      <span className="text-[10px] text-slate-400 font-bold block">Monthly Gifts</span>
-                      <span className="font-extrabold text-amber-300">🪙 {(ag.monthlyGiftsCoins / 1000000).toFixed(1)}M</span>
+                      <span className="text-[10px] text-slate-400 font-bold block">Monthly Revenue</span>
+                      <span className="font-extrabold text-amber-300">${(ag.monthlyRevenueUsd || 120000).toLocaleString()} USD</span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-400 font-bold block">Total Creators</span>
-                      <span className="font-extrabold text-purple-300">👥 {ag.totalCreators} Hosts</span>
+                      <span className="text-[10px] text-slate-400 font-bold block">Total Streamers</span>
+                      <span className="font-extrabold text-purple-300">👥 {ag.streamersCount || 150} Hosts</span>
                     </div>
                     <div>
                       <span className="text-[10px] text-slate-400 font-bold block">Agency Cut</span>
                       <span className="font-extrabold text-emerald-400">💰 {ag.commissionRatePercent}% Bonus</span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-400 font-bold block">Min. Quota</span>
-                      <span className="font-extrabold text-cyan-300">🎯 {(ag.minMonthlyQuotaCoins / 1000).toFixed(0)}K</span>
+                      <span className="text-[10px] text-slate-400 font-bold block">Verification</span>
+                      <span className="font-extrabold text-cyan-300">✓ Partnered</span>
                     </div>
                   </div>
 
@@ -262,7 +315,7 @@ export const AgenciesView: React.FC = () => {
                       onClick={() => setSelectedAgency(ag)}
                       className="text-xs font-bold text-slate-400 hover:text-slate-200"
                     >
-                      View Requirements →
+                      View Details →
                     </button>
 
                     <button
@@ -520,6 +573,69 @@ export const AgenciesView: React.FC = () => {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* REGISTER AGENCY MODAL */}
+      {showCreateAgencyModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+            <h3 className="text-lg font-black text-slate-100 flex items-center gap-2">
+              <Building2 className="w-5 h-5 text-purple-400" /> Register Partnered Talent Agency
+            </h3>
+
+            <form onSubmit={handleCreateAgency} className="space-y-3 text-xs">
+              <div>
+                <label className="text-slate-400 font-bold block mb-1">Agency Name</label>
+                <input
+                  type="text"
+                  required
+                  value={newAgencyName}
+                  onChange={e => setNewAgencyName(e.target.value)}
+                  placeholder="e.g. Apex Talent Group"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-400 font-bold block mb-1">Base Commission Cut (% Bonus for Agency)</label>
+                <input
+                  type="number"
+                  min="5"
+                  max="30"
+                  value={newAgencyCommission}
+                  onChange={e => setNewAgencyCommission(Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-400 font-bold block mb-1">Description & Host Benefits</label>
+                <textarea
+                  value={newAgencyDesc}
+                  onChange={e => setNewAgencyDesc(e.target.value)}
+                  placeholder="Training perks, monthly bonuses, and room support provided to hosts..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-purple-500 h-20"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateAgencyModal(false)}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-90 text-white font-black rounded-xl"
+                >
+                  Register Agency
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

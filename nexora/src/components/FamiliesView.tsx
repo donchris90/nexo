@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useEconomy } from '../context/EconomyContext';
 import { Family } from '../types';
+import { guildAgencyService, FamilyDoc } from '../services/GuildAgencyService';
 import { 
   Shield, 
   Crown, 
@@ -13,12 +14,46 @@ import {
   Sparkles, 
   Flame, 
   CheckCircle2, 
-  ChevronRight 
+  ChevronRight,
+  ShoppingBag,
+  Target
 } from 'lucide-react';
 
 export const FamiliesView: React.FC = () => {
   const { families, joinFamily, userLevel, addXp } = useEconomy();
   const [selectedFamily, setSelectedFamily] = useState<Family>(families[0]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newFamName, setNewFamName] = useState('');
+  const [newFamBadge, setNewFamBadge] = useState('👑 VIP');
+  const [newFamDesc, setNewFamDesc] = useState('');
+
+  // Firestore Family Subscription
+  useEffect(() => {
+    const unsub = guildAgencyService.subscribeToFamilies((liveFams) => {
+      if (liveFams && liveFams.length > 0) {
+        const mapped: Family[] = liveFams.map(f => ({
+          id: f.id!,
+          name: f.name,
+          badge: f.badge,
+          logo: f.logo || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80',
+          leaderName: f.leaderName,
+          membersCount: f.membersCount,
+          maxMembers: f.maxMembers,
+          level: f.level,
+          monthlyDiamonds: f.monthlyDiamonds,
+          rank: f.rank
+        }));
+        // Select first if current selected is default
+        if (mapped.length > 0 && (!selectedFamily || selectedFamily.id === 'f1')) {
+          setSelectedFamily(mapped[0]);
+        }
+      }
+    });
+
+    return () => {
+      if (unsub) unsub();
+    };
+  }, []);
 
   // Family Chat state
   const [familyChat, setFamilyChat] = useState([
@@ -45,6 +80,25 @@ export const FamiliesView: React.FC = () => {
     addXp(30);
   };
 
+  const handleCreateFamily = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newFamName.trim()) return;
+
+    await guildAgencyService.createFamily({
+      name: newFamName,
+      badge: newFamBadge,
+      logo: 'https://images.unsplash.com/photo-1563089145-599997674d42?auto=format&fit=crop&w=150&q=80',
+      leaderId: 'me',
+      leaderName: 'Alex Rivers',
+      description: newFamDesc || 'Elite Live Streaming Family'
+    });
+
+    setShowCreateModal(false);
+    setNewFamName('');
+    setNewFamDesc('');
+    alert('Family created successfully!');
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
       {/* HEADER BAR */}
@@ -65,13 +119,21 @@ export const FamiliesView: React.FC = () => {
           </div>
         </div>
 
-        {/* ACTIVE FAMILY STATUS */}
-        <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 p-3 rounded-2xl">
-          <div className="text-right">
-            <span className="text-[10px] text-slate-400 font-bold block uppercase">Your Family</span>
-            <span className="text-xs font-black text-amber-300 flex items-center justify-end gap-1">
-              <Crown className="w-3.5 h-3.5 text-amber-400" /> {userLevel.familyName || 'No Family Joined'}
-            </span>
+        {/* ACTIVE FAMILY STATUS & CREATE */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-red-600 hover:from-amber-400 hover:to-red-500 text-white font-black text-xs rounded-2xl shadow-lg flex items-center gap-2 transition-all"
+          >
+            <Plus className="w-4 h-4" /> Create Family
+          </button>
+          <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 p-3 rounded-2xl">
+            <div className="text-right">
+              <span className="text-[10px] text-slate-400 font-bold block uppercase">Your Family</span>
+              <span className="text-xs font-black text-amber-300 flex items-center justify-end gap-1">
+                <Crown className="w-3.5 h-3.5 text-amber-400" /> {userLevel.familyName || 'No Family Joined'}
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -261,6 +323,68 @@ export const FamiliesView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* CREATE FAMILY MODAL */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-md space-y-4 shadow-2xl">
+            <h3 className="text-lg font-black text-slate-100 flex items-center gap-2">
+              <Crown className="w-5 h-5 text-amber-400" /> Create New Family / Guild
+            </h3>
+
+            <form onSubmit={handleCreateFamily} className="space-y-3 text-xs">
+              <div>
+                <label className="text-slate-400 font-bold block mb-1">Family Name</label>
+                <input
+                  type="text"
+                  required
+                  value={newFamName}
+                  onChange={e => setNewFamName(e.target.value)}
+                  placeholder="e.g. Phoenix Elite"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-400 font-bold block mb-1">Family Badge</label>
+                <input
+                  type="text"
+                  value={newFamBadge}
+                  onChange={e => setNewFamBadge(e.target.value)}
+                  placeholder="e.g. 👑 PHOENIX"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-400 font-bold block mb-1">Description</label>
+                <textarea
+                  value={newFamDesc}
+                  onChange={e => setNewFamDesc(e.target.value)}
+                  placeholder="Family motto, requirements & PK rules..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500 h-20"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 font-bold rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl"
+                >
+                  Create (Free)
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

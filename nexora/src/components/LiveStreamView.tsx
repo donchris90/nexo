@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { LiveStream, ChatMessage, GiftItem, PartySeat, PkBattleInfo } from '../types';
 import { MOCK_STREAMS, MOCK_GIFTS } from '../data/mockData';
 import { useEconomy } from '../context/EconomyContext';
+import { LiveModerationPanel } from './LiveModerationPanel';
+import { moderationService } from '../services/ModerationService';
 import { 
   Tv, 
   Users, 
@@ -186,6 +188,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
   const [showGiftDrawer, setShowGiftDrawer] = useState(false);
   const [selectedGiftCombo, setSelectedGiftCombo] = useState<number>(1); // 1, 10, 66, 520, 1314
   const [targetSeatNumber, setTargetSeatNumber] = useState<number>(1); // Target seat for gift
+  const [showModerationPanel, setShowModerationPanel] = useState<boolean>(false);
 
   // Floating Mini Game Overlay Drawer
   const [showInStreamGame, setShowInStreamGame] = useState<boolean>(false);
@@ -633,6 +636,12 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
                   {currentVideo && isVideoPlaying && (
                     <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                   )}
+                </button>
+                <button
+                  onClick={() => setShowModerationPanel(true)}
+                  className="px-3 py-1 bg-slate-900/90 hover:bg-slate-800 text-cyan-300 font-extrabold text-xs rounded-full border border-cyan-500/40 flex items-center gap-1 shadow-lg transition-all"
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-cyan-400" /> Moderation
                 </button>
               </div>
             </div>
@@ -1750,6 +1759,22 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* LIVE MODERATION & HOST MANAGEMENT MODAL OVERLAY */}
+      {showModerationPanel && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto animate-fadeIn">
+          <div className="w-full max-w-xl">
+            <LiveModerationPanel
+              streamId={selectedStream.id}
+              hostId="alex_rivers"
+              currentUserId="alex_rivers"
+              currentUserName="Alex Rivers"
+              isHostOrMod={true}
+              onClose={() => setShowModerationPanel(false)}
+            />
           </div>
         </div>
       )}

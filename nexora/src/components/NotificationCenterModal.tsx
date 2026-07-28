@@ -11,8 +11,11 @@ import {
   Calendar, 
   ShieldCheck, 
   X, 
-  CheckCheck,
-  Trash2
+  Trash2,
+  Settings,
+  Swords,
+  Mic,
+  Check
 } from 'lucide-react';
 
 interface NotificationCenterModalProps {
@@ -21,13 +24,22 @@ interface NotificationCenterModalProps {
 }
 
 export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = ({ isOpen, onClose }) => {
-  const { notifications, markNotificationRead, clearAllNotifications } = useEconomy();
-  const [activeTab, setActiveTab] = useState<'ALL' | 'GIFTS' | 'FOLLOWERS' | 'LIVE_ALERTS' | 'MESSAGES' | 'REWARDS' | 'GAMES' | 'EVENTS' | 'SECURITY'>('ALL');
+  const { 
+    notifications, 
+    markNotificationRead, 
+    clearAllNotifications,
+    notificationPreferences,
+    updateNotificationPreferences
+  } = useEconomy();
+
+  const [activeTab, setActiveTab] = useState<'ALL' | 'INVITES' | 'GIFTS' | 'FOLLOWERS' | 'LIVE_ALERTS' | 'SECURITY' | 'SETTINGS'>('ALL');
 
   if (!isOpen) return null;
 
   const filtered = activeTab === 'ALL' 
     ? notifications 
+    : activeTab === 'INVITES'
+    ? notifications.filter(n => n.category === 'PK_INVITE' || n.category === 'LIVE_INVITE')
     : notifications.filter(n => n.category === activeTab);
 
   const unreadCount = notifications.filter(n => !n.read).length;
@@ -50,11 +62,20 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
                   </span>
                 )}
               </h3>
-              <p className="text-xs text-slate-400">Live gift alerts, follower updates, rewards & security alerts</p>
+              <p className="text-xs text-slate-400">Live PK challenges, co-host invites, gift alerts & security settings</p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab(prev => prev === 'SETTINGS' ? 'ALL' : 'SETTINGS')}
+              className={`p-2 rounded-xl text-xs font-bold transition-colors ${
+                activeTab === 'SETTINGS' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+              title="Preferences"
+            >
+              <Settings className="w-4 h-4" />
+            </button>
             <button
               onClick={clearAllNotifications}
               className="p-2 bg-slate-800 text-slate-400 hover:text-red-400 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors"
@@ -75,13 +96,12 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
         <div className="flex items-center gap-1 p-2 bg-slate-950 border-b border-slate-800 overflow-x-auto no-scrollbar">
           {[
             { id: 'ALL', label: '🔔 All' },
+            { id: 'INVITES', label: '⚔️ Invites & Challenges' },
             { id: 'GIFTS', label: '🎁 Gifts' },
             { id: 'FOLLOWERS', label: '👥 Followers' },
-            { id: 'LIVE_ALERTS', label: '🔴 Live' },
-            { id: 'MESSAGES', label: '💬 Chat' },
-            { id: 'REWARDS', label: '👑 Rewards' },
-            { id: 'GAMES', label: '🎲 Games' },
-            { id: 'SECURITY', label: '🛡️ Security' }
+            { id: 'LIVE_ALERTS', label: '🔴 Live Alerts' },
+            { id: 'SECURITY', label: '🛡️ Security' },
+            { id: 'SETTINGS', label: '⚙️ Settings' }
           ].map(tab => (
             <button
               key={tab.id}
@@ -97,49 +117,94 @@ export const NotificationCenterModal: React.FC<NotificationCenterModalProps> = (
           ))}
         </div>
 
-        {/* NOTIFICATION LIST */}
-        <div className="flex-1 p-4 overflow-y-auto space-y-3">
-          {filtered.length === 0 ? (
-            <div className="text-center py-12 text-slate-500 space-y-2">
-              <Bell className="w-10 h-10 mx-auto text-slate-700 opacity-50" />
-              <p className="text-xs font-bold">No notifications in this tab.</p>
+        {/* CONTENT VIEW */}
+        {activeTab === 'SETTINGS' ? (
+          <div className="p-6 overflow-y-auto space-y-4">
+            <h4 className="font-extrabold text-sm text-slate-100">Push & In-App Notification Preferences</h4>
+            <div className="space-y-3">
+              {[
+                { key: 'pushEnabled', label: 'Push Notifications (Browser / Mobile)' },
+                { key: 'liveInvitations', label: 'Live Room Co-Host Invites' },
+                { key: 'pkInvitations', label: 'Live PK Battle Challenges' },
+                { key: 'giftAlerts', label: 'AR Virtual Gift & Combo Alerts' },
+                { key: 'followerAlerts', label: 'New Followers & Subscriber Badges' },
+                { key: 'systemAnnouncements', label: 'Platform & Guild News' }
+              ].map(item => (
+                <div key={item.key} className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-200">{item.label}</span>
+                  <button
+                    onClick={() => updateNotificationPreferences({ [item.key]: !((notificationPreferences as any)[item.key]) })}
+                    className={`w-12 h-6 rounded-full transition-colors p-1 flex items-center ${
+                      (notificationPreferences as any)[item.key] ? 'bg-emerald-500 justify-end' : 'bg-slate-800 justify-start'
+                    }`}
+                  >
+                    <span className="w-4 h-4 rounded-full bg-white shadow-md" />
+                  </button>
+                </div>
+              ))}
             </div>
-          ) : (
-            filtered.map(notif => (
-              <div
-                key={notif.id}
-                onClick={() => markNotificationRead(notif.id)}
-                className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-start gap-3.5 ${
-                  notif.read
-                    ? 'bg-slate-950/60 border-slate-800/60 text-slate-400'
-                    : 'bg-slate-900 border-purple-500/40 text-slate-100 shadow-md ring-1 ring-purple-500/20'
-                }`}
-              >
-                <div className="p-2.5 rounded-xl bg-purple-950 border border-purple-500/30 text-pink-400 shrink-0">
-                  {notif.category === 'GIFTS' && <Gift className="w-4 h-4" />}
-                  {notif.category === 'LIVE_ALERTS' && <Radio className="w-4 h-4 text-red-400" />}
-                  {notif.category === 'GAMES' && <Gamepad2 className="w-4 h-4 text-amber-400" />}
-                  {notif.category === 'REWARDS' && <Award className="w-4 h-4 text-emerald-400" />}
-                  {notif.category === 'SECURITY' && <ShieldCheck className="w-4 h-4 text-cyan-400" />}
-                  {notif.category === 'FOLLOWERS' && <Users className="w-4 h-4 text-purple-400" />}
-                  {notif.category === 'MESSAGES' && <MessageSquare className="w-4 h-4 text-indigo-400" />}
-                </div>
-
-                <div className="flex-1 space-y-1">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-extrabold text-xs text-slate-100">{notif.title}</h4>
-                    <span className="text-[10px] text-slate-500 font-mono">{notif.timestamp}</span>
-                  </div>
-                  <p className="text-xs leading-relaxed text-slate-300">{notif.body}</p>
-                </div>
-
-                {!notif.read && (
-                  <span className="w-2.5 h-2.5 rounded-full bg-pink-500 shrink-0 mt-1" />
-                )}
+          </div>
+        ) : (
+          <div className="flex-1 p-4 overflow-y-auto space-y-3">
+            {filtered.length === 0 ? (
+              <div className="text-center py-12 text-slate-500 space-y-2">
+                <Bell className="w-10 h-10 mx-auto text-slate-700 opacity-50" />
+                <p className="text-xs font-bold">No notifications in this section.</p>
               </div>
-            ))
-          )}
-        </div>
+            ) : (
+              filtered.map(notif => (
+                <div
+                  key={notif.id}
+                  onClick={() => markNotificationRead(notif.id)}
+                  className={`p-4 rounded-2xl border transition-all flex items-start gap-3.5 ${
+                    notif.read
+                      ? 'bg-slate-950/60 border-slate-800/60 text-slate-400'
+                      : 'bg-slate-900 border-purple-500/40 text-slate-100 shadow-md ring-1 ring-purple-500/20'
+                  }`}
+                >
+                  <div className="p-2.5 rounded-xl bg-purple-950 border border-purple-500/30 text-pink-400 shrink-0">
+                    {notif.category === 'GIFTS' && <Gift className="w-4 h-4" />}
+                    {notif.category === 'LIVE_ALERTS' && <Radio className="w-4 h-4 text-red-400" />}
+                    {notif.category === 'GAMES' && <Gamepad2 className="w-4 h-4 text-amber-400" />}
+                    {notif.category === 'REWARDS' && <Award className="w-4 h-4 text-emerald-400" />}
+                    {notif.category === 'SECURITY' && <ShieldCheck className="w-4 h-4 text-cyan-400" />}
+                    {notif.category === 'FOLLOWERS' && <Users className="w-4 h-4 text-purple-400" />}
+                    {notif.category === 'MESSAGES' && <MessageSquare className="w-4 h-4 text-indigo-400" />}
+                    {notif.category === 'PK_INVITE' && <Swords className="w-4 h-4 text-red-500" />}
+                    {notif.category === 'LIVE_INVITE' && <Mic className="w-4 h-4 text-amber-400" />}
+                  </div>
+
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-extrabold text-xs text-slate-100">{notif.title}</h4>
+                      <span className="text-[10px] text-slate-500 font-mono">{notif.timestamp}</span>
+                    </div>
+                    <p className="text-xs leading-relaxed text-slate-300">{notif.body}</p>
+
+                    {(notif.category === 'PK_INVITE' || notif.category === 'LIVE_INVITE') && (
+                      <div className="pt-2 flex items-center gap-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            alert(`Accepted invitation from ${notif.inviteDetails?.hostName || 'Host'}! Opening room...`);
+                            markNotificationRead(notif.id);
+                          }}
+                          className="px-3 py-1 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-extrabold text-xs rounded-xl shadow flex items-center gap-1"
+                        >
+                          <Check className="w-3.5 h-3.5" /> Accept & Join Stream
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {!notif.read && (
+                    <span className="w-2.5 h-2.5 rounded-full bg-pink-500 shrink-0 mt-1" />
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
