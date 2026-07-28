@@ -9,12 +9,31 @@ import {
   WithdrawalRequest,
   UserLevelState,
   DailyMission,
+  MissionItem,
+  AchievementItem,
+  UserCustomizationItem,
+  LevelRewardTrack,
+  VipRoom,
+  ScheduledStream,
+  CreatorGoal,
+  NotificationPreferences,
   TreasureBox,
   NotificationItem,
   RedPacket,
   AiAssistantMessage,
   Family
 } from '../types';
+import { 
+  MOCK_WEEKLY_MISSIONS,
+  MOCK_MONTHLY_MISSIONS,
+  MOCK_ACHIEVEMENTS,
+  MOCK_CUSTOMIZATIONS,
+  MOCK_LEVEL_REWARDS,
+  MOCK_VIP_ROOMS,
+  MOCK_SCHEDULED_STREAMS,
+  MOCK_CREATOR_GOALS,
+  INITIAL_NOTIFICATION_PREFERENCES
+} from '../data/mockData';
 import { 
   auth, 
   db, 
@@ -58,12 +77,29 @@ interface EconomyContextType {
   claimDailyBonus: () => void;
   dailyBonusClaimed: boolean;
   withdrawals: WithdrawalRequest[];
-  vipTier: 'FREE' | 'SILVER' | 'GOLD' | 'DIAMOND' | 'SUPER_VIP';
+  vipTier: 'FREE' | 'VIP1' | 'VIP2' | 'VIP3' | 'VIP4' | 'VIP5' | 'VIP6' | 'VIP7' | 'VIP8' | 'VIP9' | 'VIP10' | 'SILVER' | 'GOLD' | 'DIAMOND' | 'SUPER_VIP';
   referralCode: string;
   userLevel: UserLevelState;
   addXp: (xpAmount: number) => void;
   dailyMissions: DailyMission[];
+  weeklyMissions: MissionItem[];
+  monthlyMissions: MissionItem[];
+  achievements: AchievementItem[];
+  customizations: UserCustomizationItem[];
+  levelRewards: LevelRewardTrack[];
+  vipRooms: VipRoom[];
+  scheduledStreams: ScheduledStream[];
+  creatorGoals: CreatorGoal[];
+  notificationPreferences: NotificationPreferences;
   claimMission: (missionId: string) => void;
+  claimAchievement: (achievementId: string) => void;
+  equipCustomization: (customizationId: string) => void;
+  claimLevelReward: (level: number, category: string) => void;
+  updateNotificationPreferences: (prefs: Partial<NotificationPreferences>) => void;
+  addScheduledStream: (stream: Omit<ScheduledStream, 'id'>) => void;
+  sendLiveInvite: (hostName: string, roomId: string) => void;
+  sendPkInvite: (opponentName: string, durationSeconds?: number) => void;
+  triggerPushNotification: (title: string, body: string) => void;
   treasureBox: TreasureBox;
   openTreasureBox: () => void;
   notifications: NotificationItem[];
@@ -205,6 +241,16 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const saved = localStorage.getItem('nexora_missions');
     return saved ? JSON.parse(saved) : INITIAL_MISSIONS;
   });
+
+  const [weeklyMissions, setWeeklyMissions] = useState<MissionItem[]>(MOCK_WEEKLY_MISSIONS);
+  const [monthlyMissions, setMonthlyMissions] = useState<MissionItem[]>(MOCK_MONTHLY_MISSIONS);
+  const [achievements, setAchievements] = useState<AchievementItem[]>(MOCK_ACHIEVEMENTS);
+  const [customizations, setCustomizations] = useState<UserCustomizationItem[]>(MOCK_CUSTOMIZATIONS);
+  const [levelRewards, setLevelRewards] = useState<LevelRewardTrack[]>(MOCK_LEVEL_REWARDS);
+  const [vipRooms, setVipRooms] = useState<VipRoom[]>(MOCK_VIP_ROOMS);
+  const [scheduledStreams, setScheduledStreams] = useState<ScheduledStream[]>(MOCK_SCHEDULED_STREAMS);
+  const [creatorGoals, setCreatorGoals] = useState<CreatorGoal[]>(MOCK_CREATOR_GOALS);
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(INITIAL_NOTIFICATION_PREFERENCES);
 
   const [treasureBox, setTreasureBox] = useState<TreasureBox>(INITIAL_TREASURE_BOX);
 
@@ -567,25 +613,159 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const claimMission = (missionId: string) => {
-    const targetMission = dailyMissions.find(m => m.id === missionId);
-    if (!targetMission || targetMission.claimed || !targetMission.completed) return;
+    // Check Daily
+    const dailyTarget = dailyMissions.find(m => m.id === missionId);
+    if (dailyTarget && !dailyTarget.claimed && dailyTarget.completed) {
+      setDailyMissions(prev => prev.map(m => m.id === missionId ? { ...m, claimed: true } : m));
+      setWallet(prev => ({ ...prev, coins: prev.coins + dailyTarget.rewardCoins }));
+      addXp(dailyTarget.rewardXp);
+      addTransaction({ type: 'REWARD', currency: 'COINS', amount: dailyTarget.rewardCoins, description: `Claimed Daily Mission: ${dailyTarget.title}`, status: 'COMPLETED' });
+      return;
+    }
 
-    setDailyMissions(prev => prev.map(m => m.id === missionId ? { ...m, claimed: true } : m));
+    // Check Weekly
+    const weeklyTarget = weeklyMissions.find(m => m.id === missionId);
+    if (weeklyTarget && !weeklyTarget.claimed && weeklyTarget.completed) {
+      setWeeklyMissions(prev => prev.map(m => m.id === missionId ? { ...m, claimed: true } : m));
+      setWallet(prev => ({ ...prev, coins: prev.coins + weeklyTarget.rewardCoins }));
+      addXp(weeklyTarget.rewardXp);
+      addTransaction({ type: 'REWARD', currency: 'COINS', amount: weeklyTarget.rewardCoins, description: `Claimed Weekly Mission: ${weeklyTarget.title}`, status: 'COMPLETED' });
+      return;
+    }
+
+    // Check Monthly
+    const monthlyTarget = monthlyMissions.find(m => m.id === missionId);
+    if (monthlyTarget && !monthlyTarget.claimed && monthlyTarget.completed) {
+      setMonthlyMissions(prev => prev.map(m => m.id === missionId ? { ...m, claimed: true } : m));
+      setWallet(prev => ({ ...prev, coins: prev.coins + monthlyTarget.rewardCoins }));
+      addXp(monthlyTarget.rewardXp);
+      addTransaction({ type: 'REWARD', currency: 'COINS', amount: monthlyTarget.rewardCoins, description: `Claimed Monthly Mission: ${monthlyTarget.title}`, status: 'COMPLETED' });
+      return;
+    }
+  };
+
+  const claimAchievement = (achievementId: string) => {
+    const ach = achievements.find(a => a.id === achievementId);
+    if (!ach || ach.claimed || !ach.unlocked) return;
+
+    setAchievements(prev => prev.map(a => a.id === achievementId ? { ...a, claimed: true } : a));
+    setWallet(prev => ({ ...prev, diamonds: prev.diamonds + ach.rewardDiamonds }));
+    addXp(1000);
+
+    if (ach.rewardTitle) {
+      setUserLevel(prev => ({ ...prev, userTitle: `✨ ${ach.rewardTitle}` }));
+    }
+
+    addTransaction({
+      type: 'REWARD',
+      currency: 'DIAMONDS',
+      amount: ach.rewardDiamonds,
+      description: `Unlocked Achievement Reward: ${ach.title}`,
+      status: 'COMPLETED'
+    });
+  };
+
+  const equipCustomization = (customizationId: string) => {
+    const item = customizations.find(c => c.id === customizationId);
+    if (!item || !item.isUnlocked) return;
+
+    setCustomizations(prev => prev.map(c => {
+      if (c.category === item.category) {
+        return { ...c, isEquipped: c.id === customizationId };
+      }
+      return c;
+    }));
+
+    setUserLevel(prev => {
+      const updated = { ...prev };
+      if (item.category === 'FRAME') updated.equippedFrameId = customizationId;
+      if (item.category === 'ENTRANCE_EFFECT') updated.equippedEntranceEffectId = customizationId;
+      if (item.category === 'TITLE') updated.equippedTitleId = customizationId;
+      if (item.category === 'BADGE') updated.equippedVipBadgeId = customizationId;
+      return updated;
+    });
+  };
+
+  const claimLevelReward = (level: number, category: string) => {
+    const target = levelRewards.find(r => r.level === level && r.category === category);
+    if (!target || target.claimed) return;
+
+    setLevelRewards(prev => prev.map(r => (r.level === level && r.category === category) ? { ...r, claimed: true } : r));
 
     setWallet(prev => ({
       ...prev,
-      coins: prev.coins + targetMission.rewardCoins
+      coins: prev.coins + target.rewardCoins,
+      diamonds: prev.diamonds + target.rewardDiamonds
     }));
 
-    addXp(targetMission.rewardXp);
+    addXp(500);
 
     addTransaction({
       type: 'REWARD',
       currency: 'COINS',
-      amount: targetMission.rewardCoins,
-      description: `Claimed Daily Mission Reward: ${targetMission.title}`,
+      amount: target.rewardCoins,
+      description: `Claimed Level ${level} Milestone Reward (+${target.rewardCoins} Coins & +${target.rewardDiamonds} Diamonds)`,
       status: 'COMPLETED'
     });
+  };
+
+  const updateNotificationPreferences = (prefs: Partial<NotificationPreferences>) => {
+    setNotificationPreferences(prev => ({ ...prev, ...prefs }));
+  };
+
+  const addScheduledStream = (streamData: Omit<ScheduledStream, 'id'>) => {
+    const newStream: ScheduledStream = {
+      ...streamData,
+      id: `sched_${Date.now()}`
+    };
+    setScheduledStreams(prev => [newStream, ...prev]);
+
+    triggerPushNotification('📅 Stream Scheduled!', `Your live stream "${newStream.title}" is published for ${newStream.scheduledTime}.`);
+  };
+
+  const triggerPushNotification = (title: string, body: string) => {
+    const newNotif: NotificationItem = {
+      id: `notif_${Date.now()}`,
+      category: 'SYSTEM_ANNOUNCEMENT',
+      title,
+      body,
+      timestamp: 'Just now',
+      read: false
+    };
+
+    setNotifications(prev => [newNotif, ...prev]);
+  };
+
+  const sendLiveInvite = (hostName: string, roomId: string) => {
+    const inviteNotif: NotificationItem = {
+      id: `invite_${Date.now()}`,
+      category: 'LIVE_INVITE',
+      title: `🎙️ Live Room Co-Host Invitation from ${hostName}`,
+      body: `${hostName} invited you to take a mic seat in Live Room #${roomId}!`,
+      timestamp: 'Just now',
+      read: false,
+      inviteDetails: {
+        roomId,
+        hostName
+      }
+    };
+    setNotifications(prev => [inviteNotif, ...prev]);
+  };
+
+  const sendPkInvite = (opponentName: string, durationSeconds: number = 300) => {
+    const inviteNotif: NotificationItem = {
+      id: `pk_invite_${Date.now()}`,
+      category: 'PK_INVITE',
+      title: `⚔️ Live PK Battle Challenge from ${opponentName}`,
+      body: `${opponentName} challenged you to a ${Math.round(durationSeconds / 60)}-minute live PK battle!`,
+      timestamp: 'Just now',
+      read: false,
+      inviteDetails: {
+        hostName: opponentName,
+        pkDurationSeconds: durationSeconds
+      }
+    };
+    setNotifications(prev => [inviteNotif, ...prev]);
   };
 
   const openTreasureBox = () => {
@@ -743,7 +923,24 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         userLevel,
         addXp,
         dailyMissions,
+        weeklyMissions,
+        monthlyMissions,
+        achievements,
+        customizations,
+        levelRewards,
+        vipRooms,
+        scheduledStreams,
+        creatorGoals,
+        notificationPreferences,
         claimMission,
+        claimAchievement,
+        equipCustomization,
+        claimLevelReward,
+        updateNotificationPreferences,
+        addScheduledStream,
+        sendLiveInvite,
+        sendPkInvite,
+        triggerPushNotification,
         treasureBox,
         openTreasureBox,
         notifications,
