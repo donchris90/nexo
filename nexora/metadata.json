@@ -1,0 +1,6 @@
+{
+  "name": "Nexora - Live & Social Economy Platform",
+  "description": "Next-gen Poppo & BIGO style live streaming, 9-seat party rooms, 1v1 PK battles, social feed, reels & stories, deep multi-currency wallet (Coins, Diamonds, Points), agency management, daily missions, and AI co-hosts.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
