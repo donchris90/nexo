@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ShieldCheck, ShieldAlert, Cpu, Lock, Activity, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { apiFetch } from '../lib/apiConfig';
 
 export const SecurityCenter: React.FC = () => {
   const [riskData, setRiskData] = useState<any>(null);
@@ -8,7 +9,7 @@ export const SecurityCenter: React.FC = () => {
   const handleEvaluateRisk = async () => {
     setEvaluating(true);
     try {
-      const res = await fetch('/api/security/risk', {
+      const res = await apiFetch('/api/security/risk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: 'usr_alex_rivers', transactionType: 'WITHDRAWAL', amount: 50000 })

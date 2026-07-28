@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { GameRoom } from '../types';
 import { MOCK_GAMES } from '../data/mockData';
 import { useEconomy } from '../context/EconomyContext';
+import { gamingLobbyService } from '../services/GamingLobbyService';
+import { apiFetch } from '../lib/apiConfig';
 import { 
   Gamepad2, 
   Trophy, 
@@ -24,6 +26,15 @@ import {
 export const GamingCenter: React.FC = () => {
   const { wallet, updateGamePoints } = useEconomy();
   const [activeGameTab, setActiveGameTab] = useState<'LUDO' | 'LUCKY_WHEEL' | 'QUIZ' | 'UNO' | 'CHESS' | 'LOBBY'>('LUDO');
+  const [gameRooms, setGameRooms] = useState<GameRoom[]>(MOCK_GAMES);
+
+  // Real-time Firestore subscription: replace placeholder lobby rooms with live data as soon as it arrives
+  useEffect(() => {
+    const unsub = gamingLobbyService.subscribeToRooms((liveRooms) => {
+      if (liveRooms && liveRooms.length > 0) setGameRooms(liveRooms);
+    });
+    return () => unsub();
+  }, []);
 
   // Ludo state engine
   const [ludoWager, setLudoWager] = useState<number>(500);
@@ -134,7 +145,7 @@ export const GamingCenter: React.FC = () => {
     setQuizResult(null);
 
     try {
-      const res = await fetch('/api/ai/trivia', {
+      const res = await apiFetch('/api/ai/trivia', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category: 'Gaming & Virtual Economy', difficulty: 'Medium' })
@@ -540,7 +551,7 @@ export const GamingCenter: React.FC = () => {
       {/* GAME 5: PUBLIC LOBBY ROOMS */}
       {activeGameTab === 'LOBBY' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {MOCK_GAMES.map(g => (
+          {gameRooms.map(g => (
             <div key={g.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 hover:border-purple-500/50 transition-all">
               <div className="flex items-center justify-between">
                 <span className="px-2.5 py-0.5 bg-purple-500/20 text-purple-300 text-[10px] font-black rounded-full uppercase">

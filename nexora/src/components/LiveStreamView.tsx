@@ -4,6 +4,8 @@ import { MOCK_STREAMS, MOCK_GIFTS } from '../data/mockData';
 import { useEconomy } from '../context/EconomyContext';
 import { LiveModerationPanel } from './LiveModerationPanel';
 import { moderationService } from '../services/ModerationService';
+import { liveStreamService } from '../services/LiveStreamService';
+import { apiFetch } from '../lib/apiConfig';
 import { 
   Tv, 
   Users, 
@@ -108,6 +110,24 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
 
   const [streams, setStreams] = useState<LiveStream[]>(MOCK_STREAMS);
   const [selectedStream, setSelectedStream] = useState<LiveStream>(MOCK_STREAMS[0]);
+  const [gifts, setGifts] = useState<GiftItem[]>(MOCK_GIFTS);
+
+  // Real-time Firestore subscriptions: replace placeholder content with live data as soon as it arrives
+  useEffect(() => {
+    const unsubStreams = liveStreamService.subscribeToStreams((liveStreams) => {
+      if (liveStreams && liveStreams.length > 0) {
+        setStreams(liveStreams);
+        setSelectedStream((prev) => liveStreams.find(s => s.id === prev.id) || liveStreams[0]);
+      }
+    });
+    const unsubGifts = liveStreamService.subscribeToGiftCatalog((liveGifts) => {
+      if (liveGifts && liveGifts.length > 0) setGifts(liveGifts);
+    });
+    return () => {
+      unsubStreams();
+      unsubGifts();
+    };
+  }, []);
 
   // Video Selector Modal State
   const [showVideoModal, setShowVideoModal] = useState(false);
@@ -290,7 +310,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
     if (selectedStream.aiCohostEnabled) {
       setIsAiProcessing(true);
       try {
-        const res = await fetch('/api/ai/cohost', {
+        const res = await apiFetch('/api/ai/cohost', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1033,7 +1053,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
 
               {/* GIFTS GRID */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {MOCK_GIFTS.map(g => {
+                {gifts.map(g => {
                   const totalCoins = g.coinPrice * selectedGiftCombo;
                   return (
                     <button

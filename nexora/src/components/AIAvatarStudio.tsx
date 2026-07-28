@@ -1,9 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Bot, Sparkles, Wand2, Volume2, Smile, Check } from 'lucide-react';
 import { MOCK_AVATARS } from '../data/mockData';
+import { avatarService } from '../services/AvatarService';
+import { apiFetch } from '../lib/apiConfig';
 
 export const AIAvatarStudio: React.FC = () => {
-  const [avatars] = useState(MOCK_AVATARS);
+  const [avatars, setAvatars] = useState(MOCK_AVATARS);
+
+  // Real-time Firestore subscription: replace placeholder avatar catalog with live data as soon as it arrives
+  useEffect(() => {
+    const unsub = avatarService.subscribeToAvatars((liveAvatars) => {
+      if (liveAvatars && liveAvatars.length > 0) setAvatars(liveAvatars);
+    });
+    return () => unsub();
+  }, []);
   const [style, setStyle] = useState('CYBERPUNK');
   const [keywords, setKeywords] = useState('neon armor, floating crown, fiery eyes');
   const [generatedResult, setGeneratedResult] = useState<{ prompt: string; suggestedName: string } | null>(null);
@@ -14,7 +24,7 @@ export const AIAvatarStudio: React.FC = () => {
     setLoading(true);
 
     try {
-      const res = await fetch('/api/ai/avatar', {
+      const res = await apiFetch('/api/ai/avatar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ style, keywords })

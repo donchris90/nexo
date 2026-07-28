@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShoppingProduct, DigitalProduct, CreatorService } from '../types';
 import { MOCK_SHOPPING_PRODUCTS, MOCK_DIGITAL_PRODUCTS, MOCK_SERVICES } from '../data/mockData';
 import { useEconomy } from '../context/EconomyContext';
+import { marketplaceService } from '../services/MarketplaceService';
 import { 
   Store, 
   ShoppingBag, 
@@ -22,6 +23,28 @@ import {
 export const MarketplaceView: React.FC = () => {
   const { wallet, purchaseProduct, purchaseDigitalGood } = useEconomy();
   const [activeTab, setActiveTab] = useState<'DIGITAL' | 'PHYSICAL' | 'SERVICES' | 'ORDERS' | 'SELLER_HUB'>('DIGITAL');
+
+  const [shoppingProducts, setShoppingProducts] = useState<ShoppingProduct[]>(MOCK_SHOPPING_PRODUCTS);
+  const [digitalProducts, setDigitalProducts] = useState<DigitalProduct[]>(MOCK_DIGITAL_PRODUCTS);
+  const [creatorServices, setCreatorServices] = useState<CreatorService[]>(MOCK_SERVICES);
+
+  // Real-time Firestore subscriptions: replace placeholder listings with live data as soon as it arrives
+  useEffect(() => {
+    const unsubShopping = marketplaceService.subscribeToShoppingProducts((live) => {
+      if (live && live.length > 0) setShoppingProducts(live);
+    });
+    const unsubDigital = marketplaceService.subscribeToDigitalProducts((live) => {
+      if (live && live.length > 0) setDigitalProducts(live);
+    });
+    const unsubServices = marketplaceService.subscribeToCreatorServices((live) => {
+      if (live && live.length > 0) setCreatorServices(live);
+    });
+    return () => {
+      unsubShopping();
+      unsubDigital();
+      unsubServices();
+    };
+  }, []);
 
   // Coupon state
   const [couponCode, setCouponCode] = useState('');
@@ -133,7 +156,7 @@ export const MarketplaceView: React.FC = () => {
       {/* DIGITAL GOODS GRID */}
       {activeTab === 'DIGITAL' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {MOCK_DIGITAL_PRODUCTS.map(dp => {
+          {digitalProducts.map(dp => {
             const finalPrice = appliedDiscount > 0 ? Math.floor(dp.priceCoins * (1 - appliedDiscount / 100)) : dp.priceCoins;
             return (
               <div key={dp.id} className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden p-4 space-y-3 hover:border-amber-400/50 transition-all flex flex-col justify-between">
@@ -164,8 +187,10 @@ export const MarketplaceView: React.FC = () => {
                   <button
                     onClick={() => {
                       const ok = purchaseDigitalGood({ ...dp, priceCoins: finalPrice });
-                      if (ok) alert(`Asset "${dp.title}" unlocked! Download link generated.`);
-                      else alert('Insufficient Coins! Please recharge.');
+                      if (ok) {
+                        alert(`Asset "${dp.title}" unlocked! Download link generated.`);
+                        marketplaceService.purchaseDigitalProduct(dp.id).catch(err => console.warn('Digital purchase sync warning:', err));
+                      } else alert('Insufficient Coins! Please recharge.');
                     }}
                     className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-1.5"
                   >
@@ -181,7 +206,7 @@ export const MarketplaceView: React.FC = () => {
       {/* PHYSICAL & LIVE GEAR GRID */}
       {activeTab === 'PHYSICAL' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {MOCK_SHOPPING_PRODUCTS.map(sp => (
+          {shoppingProducts.map(sp => (
             <div key={sp.id} className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden p-4 space-y-3 hover:border-purple-500/50 transition-all flex flex-col justify-between">
               <div className="space-y-3">
                 <img
@@ -202,8 +227,10 @@ export const MarketplaceView: React.FC = () => {
                 <button
                   onClick={() => {
                     const ok = purchaseProduct(sp);
-                    if (ok) alert(`Order placed for "${sp.title}"! Shipping tracking ID generated.`);
-                    else alert('Insufficient Coins! Please recharge.');
+                    if (ok) {
+                      alert(`Order placed for "${sp.title}"! Shipping tracking ID generated.`);
+                      marketplaceService.purchaseShoppingProduct(sp.id).catch(err => console.warn('Product purchase sync warning:', err));
+                    } else alert('Insufficient Coins! Please recharge.');
                   }}
                   className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-indigo-500/20"
                 >
@@ -218,7 +245,7 @@ export const MarketplaceView: React.FC = () => {
       {/* SERVICES MARKETPLACE */}
       {activeTab === 'SERVICES' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {MOCK_SERVICES.map(s => (
+          {creatorServices.map(s => (
             <div key={s.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 hover:border-cyan-500/50 transition-all">
               <div className="flex items-center gap-3">
                 <img
