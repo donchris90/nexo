@@ -351,10 +351,6 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
     setAgoraJoining(true);
     try {
       await agoraEngine.joinChannel(selectedStream.id, 'host', user?.uid);
-      const localVideoTrack = agoraEngine.getLocalVideoTrack();
-      if (localVideoTrack && videoRef.current) {
-        localVideoTrack.play(videoRef.current);
-      }
       setWebcamEnabled(true);
     } catch (err) {
       console.warn('Failed to go live via Agora:', err);
@@ -363,6 +359,17 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
       setAgoraJoining(false);
     }
   };
+
+  // Attach the host's own local camera preview once the container has actually
+  // mounted in the DOM (it only exists after webcamEnabled flips to true, so
+  // this can't be done inline inside toggleWebcam above).
+  useEffect(() => {
+    if (!webcamEnabled) return;
+    const localVideoTrack = agoraEngine.getLocalVideoTrack();
+    if (localVideoTrack && videoRef.current) {
+      localVideoTrack.play(videoRef.current);
+    }
+  }, [webcamEnabled]);
 
   // Viewers: auto-join the Agora channel as audience and subscribe to the host's stream
   useEffect(() => {
