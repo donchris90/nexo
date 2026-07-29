@@ -123,17 +123,19 @@ interface EconomyContextType {
   joinFamily: (familyId: string) => void;
 }
 
+// Logged-out / not-yet-loaded placeholder only. Real balances always come from
+// WalletService's Firestore ledger once a user is authenticated.
 const INITIAL_WALLET: WalletState = {
-  coins: 24500,
-  points: 78000,
-  diamonds: 18400,
-  lockedCoins: 500,
-  lockedPoints: 1200,
-  pendingEarnings: 1250.00,
-  withdrawalBalance: 820.00,
-  bonusBalance: 3500,
-  totalSpentCoins: 84000,
-  agencyCommissionCoins: 5200
+  coins: 0,
+  points: 0,
+  diamonds: 0,
+  lockedCoins: 0,
+  lockedPoints: 0,
+  pendingEarnings: 0,
+  withdrawalBalance: 0,
+  bonusBalance: 0,
+  totalSpentCoins: 0,
+  agencyCommissionCoins: 0
 };
 
 const INITIAL_USER_LEVEL: UserLevelState = {
@@ -260,10 +262,7 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [wallet, setWallet] = useState<WalletState>(() => {
-    const saved = localStorage.getItem('nexora_wallet');
-    return saved ? JSON.parse(saved) : INITIAL_WALLET;
-  });
+  const [wallet, setWallet] = useState<WalletState>(INITIAL_WALLET);
 
   const [userLevel, setUserLevel] = useState<UserLevelState>(() => {
     const saved = localStorage.getItem('nexora_user_level');
@@ -287,39 +286,7 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const [treasureBox, setTreasureBox] = useState<TreasureBox>(INITIAL_TREASURE_BOX);
 
-  const [transactions, setTransactions] = useState<TransactionRecord[]>(() => {
-    const saved = localStorage.getItem('nexora_txs');
-    return saved ? JSON.parse(saved) : [
-      {
-        id: 'tx_101',
-        type: 'PURCHASE',
-        currency: 'COINS',
-        amount: 10000,
-        description: 'Coins Bundle Recharged via Google Pay / Stripe',
-        timestamp: new Date(Date.now() - 3600000 * 4).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'COMPLETED'
-      },
-      {
-        id: 'tx_102',
-        type: 'GAME_WIN',
-        currency: 'POINTS',
-        amount: 5000,
-        description: 'Won Ludo Master PvP Tournament Final',
-        timestamp: new Date(Date.now() - 3600000 * 2).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'COMPLETED'
-      },
-      {
-        id: 'tx_103',
-        type: 'GIFT_SENT',
-        currency: 'COINS',
-        amount: 2500,
-        description: 'Sent Cyber Sports Car Combo to Aria Nova (Seat #1)',
-        timestamp: new Date(Date.now() - 3600000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'COMPLETED',
-        relatedUser: 'Aria Nova'
-      }
-    ];
-  });
+  const [transactions, setTransactions] = useState<TransactionRecord[]>([]);
 
   // FIREBASE AUTH & FIRESTORE LISTENERS FOR USER PROFILE AND ECONOMY STATE
   useEffect(() => {
@@ -330,19 +297,28 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         // 1. Sync user profile with Firestore /users/{uid}
         const userRef = doc(db, 'users', user.uid);
         const snap = await getDoc(userRef);
-        if (snap.exists()) {
-          const data = snap.data();
-          if (data.wallet) setWallet(data.wallet);
-          if (data.userLevel) setUserLevel(data.userLevel);
-        } else {
+        if (!snap.exists()) {
           await setDoc(userRef, {
             uid: user.uid,
-            displayName: user.displayName || 'Nexora VIP User',
+            displayName: user.displayName || 'Nexora User',
             photoURL: user.photoURL || '',
-            wallet,
-            userLevel,
             createdAt: new Date().toISOString()
           });
+        }
+
+        // 1b. Load REAL wallet balance + transaction history + withdrawal history
+        // from the Firestore ledger (WalletService) — this replaces any mock/local data.
+        try {
+          const [realWallet, realTxs, realWithdrawals] = await Promise.all([
+            walletService.calculateBalanceFromLedger(user.uid),
+            walletService.getLedgerHistory(user.uid),
+            walletService.getWithdrawalHistory(user.uid)
+          ]);
+          setWallet(realWallet);
+          setTransactions(realTxs);
+          setWithdrawals(realWithdrawals);
+        } catch (err) {
+          console.warn('Failed to load real wallet/ledger data:', err);
         }
 
         // 2. Sync economy state (missions, achievements, customizations, scheduled streams, creator goals)
@@ -381,6 +357,12 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         });
 
         return () => unsubEcon();
+      } else {
+        // Signed out: reset to a clean zero-state, never leave a previous
+        // user's (or mock) balances/history visible.
+        setWallet(INITIAL_WALLET);
+        setTransactions([]);
+        setWithdrawals([]);
       }
     });
     return () => unsubscribe();
@@ -441,26 +423,12 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([
-    {
-      id: 'wd_1',
-      amountDiamonds: 10000,
-      amountUsd: 500.00,
-      method: 'BANK_WIRE',
-      accountDetails: 'Nexora Creator #9924',
-      status: 'PROCESSED',
-      requestDate: '2026-07-26'
-    }
-  ]);
+  const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
 
   const [activeARGift, setActiveARGift] = useState<GiftItem | null>(null);
   const [dailyBonusClaimed, setDailyBonusClaimed] = useState<boolean>(false);
   const vipTier = 'GOLD';
   const referralCode = 'NEXORA-ALEX-992';
-
-  useEffect(() => {
-    localStorage.setItem('nexora_wallet', JSON.stringify(wallet));
-  }, [wallet]);
 
   useEffect(() => {
     localStorage.setItem('nexora_user_level', JSON.stringify(userLevel));
@@ -469,10 +437,6 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => {
     localStorage.setItem('nexora_missions', JSON.stringify(dailyMissions));
   }, [dailyMissions]);
-
-  useEffect(() => {
-    localStorage.setItem('nexora_txs', JSON.stringify(transactions));
-  }, [transactions]);
 
   const clearARGift = () => setActiveARGift(null);
 
@@ -497,7 +461,7 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   };
 
-  const addTransaction = (record: Omit<TransactionRecord, 'id' | 'timestamp'>) => {
+  const addTransaction = (record: Omit<TransactionRecord, 'id' | 'timestamp'>, metadata?: Record<string, any>) => {
     const newTx: TransactionRecord = {
       ...record,
       id: `tx_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
@@ -515,6 +479,7 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         description: newTx.description,
         status: newTx.status || 'COMPLETED',
         relatedUser: newTx.relatedUser,
+        metadata,
         timestamp: new Date().toISOString()
       }).catch(err => {
         console.warn('WalletService ledger record warning:', err);
@@ -523,6 +488,10 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const sendGift = (gift: GiftItem, streamTitle: string, creatorName: string): boolean => {
+    if (!auth.currentUser) {
+      setAuthError('Please sign in to send gifts.');
+      return false;
+    }
     if (wallet.coins < gift.coinPrice) {
       return false;
     }
@@ -542,7 +511,7 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     addTransaction({
       type: 'GIFT_SENT',
       currency: 'COINS',
-      amount: gift.coinPrice,
+      amount: -gift.coinPrice,
       description: `Sent ${gift.name} (${gift.icon}) during "${streamTitle}" (Host receives +${creatorDiamonds} 💎)`,
       status: 'COMPLETED',
       relatedUser: creatorName
@@ -553,6 +522,10 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const rechargeCoins = (coinsAmount: number, paymentMethod: string) => {
+    if (!auth.currentUser) {
+      setAuthError('Please sign in to recharge coins.');
+      return;
+    }
     setWallet(prev => ({
       ...prev,
       coins: prev.coins + coinsAmount
@@ -561,7 +534,7 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     addXp(100);
 
     addTransaction({
-      type: 'PURCHASE',
+      type: 'DEPOSIT',
       currency: 'COINS',
       amount: coinsAmount,
       description: `Recharged ${coinsAmount.toLocaleString()} Coins via ${paymentMethod}`,
@@ -570,6 +543,10 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const convertCoinsToPoints = (coinsAmount: number): boolean => {
+    if (!auth.currentUser) {
+      setAuthError('Please sign in to exchange coins.');
+      return false;
+    }
     if (wallet.coins < coinsAmount) return false;
 
     const pointsReceived = coinsAmount * 10;
@@ -582,9 +559,17 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     addTransaction({
       type: 'EXCHANGE',
+      currency: 'COINS',
+      amount: -coinsAmount,
+      description: `Exchanged ${coinsAmount.toLocaleString()} Coins for ${pointsReceived.toLocaleString()} Points`,
+      status: 'COMPLETED'
+    });
+
+    addTransaction({
+      type: 'EXCHANGE',
       currency: 'POINTS',
       amount: pointsReceived,
-      description: `Exchanged ${coinsAmount} Coins for ${pointsReceived.toLocaleString()} Points`,
+      description: `Exchanged ${coinsAmount.toLocaleString()} Coins for ${pointsReceived.toLocaleString()} Points`,
       status: 'COMPLETED'
     });
 
@@ -592,6 +577,9 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const requestWithdrawal = (diamondsAmount: number, method: 'PAYPAL' | 'BANK_WIRE' | 'STRIPE' | 'CRYPTO', accountDetails: string) => {
+    if (!auth.currentUser) {
+      return { success: false, message: 'Please sign in to request a withdrawal.' };
+    }
     if (diamondsAmount < 1000) {
       return { success: false, message: 'Minimum withdrawal is 1,000 Diamonds ($50.00 USD).' };
     }
@@ -622,15 +610,20 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     addTransaction({
       type: 'WITHDRAWAL',
       currency: 'DIAMONDS',
-      amount: diamondsAmount,
-      description: `Requested withdrawal of ${diamondsAmount} Diamonds ($${usdValue.toFixed(2)} USD)`,
-      status: 'PENDING'
-    });
+      amount: -diamondsAmount,
+      description: `Requested withdrawal of ${diamondsAmount} Diamonds ($${usdValue.toFixed(2)} USD) to ${method}`,
+      status: 'PENDING',
+      relatedUser: accountDetails
+    }, { method, accountDetails });
 
     return { success: true, message: `Withdrawal request for $${usdValue.toFixed(2)} submitted successfully!` };
   };
 
   const updateGamePoints = (deltaPoints: number, description: string, _gameName: string) => {
+    if (!auth.currentUser) {
+      setAuthError('Please sign in to play.');
+      return;
+    }
     setWallet(prev => ({
       ...prev,
       points: Math.max(0, prev.points + deltaPoints)
@@ -641,13 +634,17 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     addTransaction({
       type: deltaPoints >= 0 ? 'GAME_WIN' : 'GAME_WAGER',
       currency: 'POINTS',
-      amount: Math.abs(deltaPoints),
+      amount: deltaPoints,
       description,
       status: 'COMPLETED'
     });
   };
 
   const purchaseProduct = (product: ShoppingProduct): boolean => {
+    if (!auth.currentUser) {
+      setAuthError('Please sign in to make a purchase.');
+      return false;
+    }
     if (wallet.coins < product.priceCoins) return false;
 
     setWallet(prev => ({ ...prev, coins: prev.coins - product.priceCoins }));
@@ -655,7 +652,7 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     addTransaction({
       type: 'PURCHASE',
       currency: 'COINS',
-      amount: product.priceCoins,
+      amount: -product.priceCoins,
       description: `Bought Live Shopping item: ${product.title}`,
       status: 'COMPLETED',
       relatedUser: product.creatorName
@@ -665,6 +662,10 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const purchaseDigitalGood = (product: DigitalProduct): boolean => {
+    if (!auth.currentUser) {
+      setAuthError('Please sign in to make a purchase.');
+      return false;
+    }
     if (wallet.coins < product.priceCoins) return false;
 
     setWallet(prev => ({ ...prev, coins: prev.coins - product.priceCoins }));
@@ -672,7 +673,7 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     addTransaction({
       type: 'DIGITAL_BUY',
       currency: 'COINS',
-      amount: product.priceCoins,
+      amount: -product.priceCoins,
       description: `Downloaded Digital Asset: ${product.title}`,
       status: 'COMPLETED',
       relatedUser: product.creatorName
@@ -682,6 +683,10 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const purchaseTicket = (event: TicketedEvent, isVip: boolean): boolean => {
+    if (!auth.currentUser) {
+      setAuthError('Please sign in to purchase a ticket.');
+      return false;
+    }
     const cost = isVip ? event.vipTicketCoins : event.priceCoins;
     if (wallet.coins < cost) return false;
 
@@ -690,7 +695,7 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     addTransaction({
       type: 'TICKET_PURCHASE',
       currency: 'COINS',
-      amount: cost,
+      amount: -cost,
       description: `Purchased ${isVip ? 'VIP' : 'Standard'} Ticket for ${event.title}`,
       status: 'COMPLETED',
       relatedUser: event.organizerName
@@ -701,6 +706,10 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const claimDailyBonus = () => {
     if (dailyBonusClaimed) return;
+    if (!auth.currentUser) {
+      setAuthError('Please sign in to claim your daily bonus.');
+      return;
+    }
 
     setWallet(prev => ({
       ...prev,
@@ -716,6 +725,14 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       type: 'REWARD',
       currency: 'COINS',
       amount: 500,
+      description: 'Daily Check-in Reward (+500 Coins, +2,000 Points & +300 XP)',
+      status: 'COMPLETED'
+    });
+
+    addTransaction({
+      type: 'REWARD',
+      currency: 'POINTS',
+      amount: 2000,
       description: 'Daily Check-in Reward (+500 Coins, +2,000 Points & +300 XP)',
       status: 'COMPLETED'
     });
