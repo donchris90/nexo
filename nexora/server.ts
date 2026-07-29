@@ -5,6 +5,7 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import pkg from 'agora-token';
 import Stripe from 'stripe';
+import cors from 'cors';
 
 const { RtcTokenBuilder, RtcRole } = pkg;
 
@@ -12,8 +13,12 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Render (and most hosts) assign the port dynamically via process.env.PORT
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
+  // Allow requests from the packaged mobile app (capacitor://, ionic://, file://)
+  // and any web origin, since this API is consumed by the native app directly.
+  app.use(cors());
   app.use(express.json());
 
   // Lazy Stripe Initialization
@@ -139,24 +144,201 @@ async function startServer() {
     }
   });
 
-  // PayPal Create Order Endpoint
+  // Helper for PayPal OAuth Token
+  const getPayPalAccessToken = async (): Promise<{ token: string; baseUrl: string } | null> => {
+    const clientId = process.env.PAYPAL_CLIENT_ID;
+    const clientSecret = process.env.PAYPAL_CLIENT_SECRET || process.env.PAYPAL_SECRET;
+    if (!clientId || !clientSecret) return null;
+
+    const authHeader = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+    const isProd = process.env.PAYPAL_MODE === 'live';
+    const baseUrl = isProd ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+
+    try {
+      const resp = await fetch(`${baseUrl}/v1/oauth2/token`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Basic ${authHeader}`,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: 'grant_type=client_credentials'
+      });
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      if (!data.access_token) return null;
+      return { token: data.access_token, baseUrl };
+    } catch (err) {
+      console.error('Failed to get PayPal token:', err);
+      return null;
+    }
+  };
+
+  // PayPal Create Order Endpoint (Orders v2 API)
   app.post('/api/payments/paypal/create-order', async (req, res) => {
     try {
       const { userId, amountUsd, coins } = req.body;
-      const paypalClientId = process.env.PAYPAL_CLIENT_ID;
+      const paypalAuth = await getPayPalAccessToken();
 
-      const orderId = `PAYPAL-ORD-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+      if (!paypalAuth) {
+        // Safe sandbox fallback when credentials are unconfigured
+        const orderId = `PAYPAL-ORD-SANDBOX-${Date.now()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+        return res.json({
+          status: 'SUCCESS',
+          orderId,
+          amountUsd,
+          coins,
+          isLiveGateway: false,
+          approvalUrl: `https://www.sandbox.paypal.com/checkoutnow?token=${orderId}`,
+          message: `PayPal sandbox order ${orderId} created (Configure PAYPAL_CLIENT_ID & PAYPAL_CLIENT_SECRET for live PayPal API).`
+        });
+      }
+
+      const { token, baseUrl } = paypalAuth;
+      const val = Number(amountUsd || 1).toFixed(2);
+
+      const orderResp = await fetch(`${baseUrl}/v2/checkout/orders`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          intent: 'CAPTURE',
+          purchase_units: [
+            {
+              amount: {
+                currency_code: 'USD',
+                value: val
+              },
+              custom_id: userId || 'usr_guest',
+              description: `Nexora ${coins || 0} Coins Bundle`
+            }
+          ]
+        })
+      });
+
+      const orderData = await orderResp.json();
+      if (!orderResp.ok) {
+        throw new Error(orderData?.message || 'PayPal Orders v2 API error');
+      }
+
+      const approveLink = orderData.links?.find((l: any) => l.rel === 'approve')?.href;
+
+      return res.json({
+        status: 'SUCCESS',
+        orderId: orderData.id,
+        amountUsd,
+        coins,
+        isLiveGateway: true,
+        approvalUrl: approveLink || `https://www.paypal.com/checkoutnow?token=${orderData.id}`,
+        message: `PayPal order ${orderData.id} created successfully via Orders v2 API.`
+      });
+    } catch (err: any) {
+      console.error('Error in /api/payments/paypal/create-order:', err);
+      return res.status(500).json({ error: err?.message || 'PayPal order creation failed' });
+    }
+  });
+
+  // PayPal Capture Order Endpoint
+  app.post('/api/payments/paypal/capture-order', async (req, res) => {
+    try {
+      const { orderId, userId, coins } = req.body;
+      const paypalAuth = await getPayPalAccessToken();
+
+      if (!paypalAuth) {
+        const captureId = `paypal_cap_sandbox_${Date.now()}`;
+        return res.json({
+          status: 'SUCCESS',
+          orderId,
+          captureId,
+          coins,
+          isLiveGateway: false,
+          message: `PayPal payment captured in Sandbox mode (Order #${orderId}).`
+        });
+      }
+
+      const { token, baseUrl } = paypalAuth;
+      const captureResp = await fetch(`${baseUrl}/v2/checkout/orders/${orderId}/capture`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      const captureData = await captureResp.json();
+      if (!captureResp.ok) {
+        throw new Error(captureData?.message || 'Failed to capture PayPal order');
+      }
+
+      const captureId = captureData.purchase_units?.[0]?.payments?.captures?.[0]?.id || captureData.id;
+
       return res.json({
         status: 'SUCCESS',
         orderId,
-        amountUsd,
+        captureId,
         coins,
-        isLiveGateway: !!paypalClientId,
-        approvalUrl: `https://www.sandbox.paypal.com/checkoutnow?token=${orderId}`,
-        message: `PayPal order ${orderId} created successfully.`
+        isLiveGateway: true,
+        message: `PayPal order ${orderId} captured successfully (Capture ID: ${captureId}).`
       });
     } catch (err: any) {
-      return res.status(500).json({ error: 'PayPal order creation failed' });
+      console.error('Error in /api/payments/paypal/capture-order:', err);
+      return res.status(500).json({ error: err?.message || 'PayPal capture failed' });
+    }
+  });
+
+  // Razorpay Create Order Endpoint
+  app.post('/api/payments/razorpay/create-order', async (req, res) => {
+    try {
+      const { userId, amountUsd, coins } = req.body;
+      const keyId = process.env.RAZORPAY_KEY_ID;
+      const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+      if (!keyId || !keySecret) {
+        const orderId = `rzp_ord_sandbox_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        return res.json({
+          status: 'SUCCESS',
+          orderId,
+          amountUsd,
+          coins,
+          isLiveGateway: false,
+          message: 'Razorpay order created in Sandbox mode (Configure RAZORPAY_KEY_ID & RAZORPAY_KEY_SECRET for live transactions).'
+        });
+      }
+
+      const authHeader = Buffer.from(`${keyId}:${keySecret}`).toString('base64');
+      const amountPaise = Math.round((amountUsd || 1) * 83 * 100); // INR paise equivalent
+
+      const rzpResp = await fetch('https://api.razorpay.com/v1/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Basic ${authHeader}`
+        },
+        body: JSON.stringify({
+          amount: amountPaise,
+          currency: 'INR',
+          receipt: `rcpt_${userId || 'usr'}_${Date.now()}`,
+          notes: { userId: userId || 'usr_guest', coins: String(coins || 0) }
+        })
+      });
+
+      const rzpData = await rzpResp.json();
+      if (!rzpResp.ok) {
+        throw new Error(rzpData?.error?.description || 'Razorpay order creation failed');
+      }
+
+      return res.json({
+        status: 'SUCCESS',
+        orderId: rzpData.id,
+        amountUsd,
+        coins,
+        isLiveGateway: true,
+        message: `Razorpay order ${rzpData.id} created successfully.`
+      });
+    } catch (err: any) {
+      console.error('Error in /api/payments/razorpay/create-order:', err);
+      return res.status(500).json({ error: err?.message || 'Razorpay order creation failed' });
     }
   });
 
