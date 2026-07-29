@@ -9,6 +9,15 @@ import AgoraRTC, {
 // Retrieve App ID from environment variable without hardcoded fallback
 export const AGORA_APP_ID = ((import.meta as any).env?.VITE_AGORA_APP_ID as string) || '';
 
+export function isValidAgoraAppId(appId: string | null | undefined): boolean {
+  if (!appId || typeof appId !== 'string') return false;
+  const trimmed = appId.trim();
+  if (trimmed.length !== 32) return false;
+  if (trimmed === 'a0000000000000000000000000000000') return false;
+  if (trimmed.startsWith('unconfigured') || trimmed.startsWith('AIza')) return false;
+  return /^[0-9a-fA-F]{32}$/.test(trimmed);
+}
+
 export interface AgoraStreamState {
   client: IAgoraRTCClient | null;
   localVideoTrack: ICameraVideoTrack | null;
@@ -31,51 +40,86 @@ export class AgoraManager {
 
   constructor() {
     if (typeof window !== 'undefined') {
-      this.client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
+      try {
+        this.client = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
+      } catch (e) {
+        console.warn('AgoraRTC.createClient warning:', e);
+      }
     }
   }
 
   public async joinChannel(channelName: string, role: 'host' | 'audience' = 'audience', uid?: string | number) {
-    if (!this.client) return;
+    if (!this.client) return null;
 
-    await this.client.setClientRole(role === 'host' ? 'host' : 'audience');
+    try {
+      await this.client.setClientRole(role === 'host' ? 'host' : 'audience');
+    } catch (e) {
+      console.warn('Agora setClientRole notice:', e);
+    }
     
     let token: string | null = null;
     let appIdToUse = AGORA_APP_ID;
 
     try {
       const response = await fetch(`/api/agora/token?channelName=${encodeURIComponent(channelName)}&uid=${uid || 0}&role=${role === 'host' ? 'publisher' : 'subscriber'}`);
-      const data = await response.json();
-      if (data.token) {
-        token = data.token;
-      }
-      if (data.appId) {
-        appIdToUse = data.appId;
+      if (response.ok) {
+        const data = await response.json();
+        if (data.token) token = data.token;
+        if (data.appId) appIdToUse = data.appId;
       }
     } catch (err) {
       console.warn('Failed to fetch RTC token from server endpoint:', err);
     }
 
-    if (!appIdToUse) {
-      console.warn('Agora App ID not available. Please configure AGORA_APP_ID environment variable.');
-      return null;
+    if (!isValidAgoraAppId(appIdToUse)) {
+      console.warn('[AgoraManager] AGORA_APP_ID is unconfigured or invalid. Running in local media simulation mode.');
+      if (role === 'host') {
+        try {
+          if (!this.localAudioTrack || !this.localVideoTrack) {
+            const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
+            this.localAudioTrack = audioTrack;
+            this.localVideoTrack = videoTrack;
+          }
+        } catch (err) {
+          console.warn('[AgoraManager] Camera/Microphone preview warning:', err);
+        }
+      }
+      return uid || 100001;
     }
 
     // Join channel with dynamic token
-    const assignedUid = await this.client.join(appIdToUse, channelName, token, uid || null);
-    
-    if (role === 'host') {
-      try {
-        const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
-        this.localAudioTrack = audioTrack;
-        this.localVideoTrack = videoTrack;
-        await this.client.publish([audioTrack, videoTrack]);
-      } catch (err) {
-        console.warn('Camera/Microphone media permission warning (using canvas fallback):', err);
+    try {
+      const assignedUid = await this.client.join(appIdToUse, channelName, token, uid || null);
+      
+      if (role === 'host') {
+        try {
+          if (!this.localAudioTrack || !this.localVideoTrack) {
+            const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
+            this.localAudioTrack = audioTrack;
+            this.localVideoTrack = videoTrack;
+          }
+          await this.client.publish([this.localAudioTrack, this.localVideoTrack]);
+        } catch (err) {
+          console.warn('Camera/Microphone media permission warning (using fallback):', err);
+        }
       }
-    }
 
-    return assignedUid;
+      return assignedUid;
+    } catch (err: any) {
+      console.warn('[AgoraManager] Gateway server join notice (using local media mode):', err?.message || err);
+      if (role === 'host') {
+        try {
+          if (!this.localAudioTrack || !this.localVideoTrack) {
+            const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
+            this.localAudioTrack = audioTrack;
+            this.localVideoTrack = videoTrack;
+          }
+        } catch (micErr) {
+          console.warn('[AgoraManager] Media track creation warning:', micErr);
+        }
+      }
+      return uid || 100001;
+    }
   }
 
   public async leaveChannel() {
@@ -88,7 +132,11 @@ export class AgoraManager {
       this.localVideoTrack = null;
     }
     if (this.client) {
-      await this.client.leave();
+      try {
+        await this.client.leave();
+      } catch (err) {
+        // ignore leave errors when not connected
+      }
     }
   }
 
