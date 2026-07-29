@@ -19,7 +19,10 @@ import { useEconomy } from '../context/EconomyContext';
 interface GoLiveModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSelectStreamType: (type: 'VIDEO' | 'PARTY_9SEAT' | 'PK_BATTLE' | 'REEL') => void;
+  onSelectStreamType: (
+    type: 'VIDEO' | 'PARTY_9SEAT' | 'PK_BATTLE' | 'REEL',
+    details: { title: string; tag: string }
+  ) => void;
 }
 
 export const GoLiveModal: React.FC<GoLiveModalProps> = ({
@@ -101,7 +104,7 @@ export const GoLiveModal: React.FC<GoLiveModalProps> = ({
             <button
               key={mode.id}
               onClick={() => {
-                onSelectStreamType(mode.id as any);
+                onSelectStreamType(mode.id as any, { title: streamTitle, tag: selectedTag });
                 onClose();
               }}
               className={`p-4 bg-slate-950 border border-slate-800 hover:border-pink-500/50 rounded-2xl text-left space-y-1.5 transition-all group hover:scale-[1.02] shadow-md`}
@@ -136,7 +139,7 @@ export const GoLiveModal: React.FC<GoLiveModalProps> = ({
         {/* ACTION BUTTON */}
         <button
           onClick={() => {
-            onSelectStreamType('VIDEO');
+            onSelectStreamType('VIDEO', { title: streamTitle, tag: selectedTag });
             onClose();
           }}
           className="w-full py-3 bg-gradient-to-r from-pink-500 via-purple-600 to-amber-500 text-white font-black text-xs rounded-2xl shadow-xl hover:opacity-90 flex items-center justify-center gap-2"
