@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LiveStream, ChatMessage, GiftItem, PartySeat, PkBattleInfo } from '../types';
-import { MOCK_STREAMS, MOCK_GIFTS } from '../data/mockData';
 import { useEconomy } from '../context/EconomyContext';
+import { useAuth } from '../hooks/useAuth';
 import { LiveModerationPanel } from './LiveModerationPanel';
 import { moderationService } from '../services/ModerationService';
 import { liveStreamService } from '../services/LiveStreamService';
@@ -60,10 +60,19 @@ import { videoService } from '../services/VideoService';
 
 interface LiveStreamViewProps {
   mode?: 'LIVE' | 'PARTY';
+  onOpenGoLiveModal?: () => void;
+  focusStreamId?: string;
 }
 
-export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' }) => {
-  const { wallet, sendGift, purchaseProduct, updateGamePoints, claimRedPacket, redPacket } = useEconomy();
+export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', onOpenGoLiveModal, focusStreamId }) => {
+  const { user } = useAuth();
+  const { wallet, sendGift, purchaseProduct, updateGamePoints, claimRedPacket, redPacket, userLevel } = useEconomy();
+
+  // Real identity of the person using the app right now (falls back gracefully if signed out)
+  const myUserId = user?.uid || 'guest_' + (typeof window !== 'undefined' ? 'local' : 'server');
+  const myDisplayName = user?.displayName || 'Guest';
+  const myAvatarUrl = user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${myUserId}`;
+  const myBadge = `${userLevel.vipTier} VIP`;
   const {
     tracks,
     currentTrack,
@@ -108,17 +117,20 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
     videoRef: syncVideoRef
   } = useVideoPlayer();
 
-  const [streams, setStreams] = useState<LiveStream[]>(MOCK_STREAMS);
-  const [selectedStream, setSelectedStream] = useState<LiveStream>(MOCK_STREAMS[0]);
-  const [gifts, setGifts] = useState<GiftItem[]>(MOCK_GIFTS);
+  const [streams, setStreams] = useState<LiveStream[]>([]);
+  const [selectedStream, setSelectedStream] = useState<LiveStream | null>(null);
+  const [gifts, setGifts] = useState<GiftItem[]>([]);
+  const [streamsLoaded, setStreamsLoaded] = useState(false);
 
   // Real-time Firestore subscriptions: replace placeholder content with live data as soon as it arrives
   useEffect(() => {
     const unsubStreams = liveStreamService.subscribeToStreams((liveStreams) => {
-      if (liveStreams && liveStreams.length > 0) {
-        setStreams(liveStreams);
-        setSelectedStream((prev) => liveStreams.find(s => s.id === prev.id) || liveStreams[0]);
-      }
+      setStreams(liveStreams || []);
+      setSelectedStream((prev) => {
+        if (!liveStreams || liveStreams.length === 0) return null;
+        return liveStreams.find(s => s.id === prev?.id) || liveStreams[0];
+      });
+      setStreamsLoaded(true);
     });
     const unsubGifts = liveStreamService.subscribeToGiftCatalog((liveGifts) => {
       if (liveGifts && liveGifts.length > 0) setGifts(liveGifts);
@@ -128,6 +140,13 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
       unsubGifts();
     };
   }, []);
+
+  // When App.tsx creates a new stream on "Go Live", jump straight to it once it arrives
+  useEffect(() => {
+    if (!focusStreamId) return;
+    const match = streams.find(s => s.id === focusStreamId);
+    if (match) setSelectedStream(match);
+  }, [focusStreamId, streams]);
 
   // Video Selector Modal State
   const [showVideoModal, setShowVideoModal] = useState(false);
@@ -142,7 +161,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
   // Attach real-time Firestore stream audio & video synchronization
   useEffect(() => {
     if (selectedStream?.id) {
-      const isHost = selectedStream.creatorName === 'Alex Rivers' || selectedStream.creatorName === 'Aria Nova';
+      const isHost = !!user && selectedStream.creatorId === user.uid;
       attachStreamSync(selectedStream.id, isHost);
       attachVideoSync(selectedStream.id, isHost);
     }
@@ -150,7 +169,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
       detachStreamSync();
       detachVideoSync();
     };
-  }, [selectedStream?.id]);
+  }, [selectedStream?.id, selectedStream?.creatorId, user?.uid]);
   const [activeCategory, setActiveCategory] = useState<string>('ALL');
   const [liveSubTab, setLiveSubTab] = useState<'POPULAR' | 'NEARBY' | 'FEATURED' | 'EXPLORE'>('POPULAR');
   const [partyCategory, setPartyCategory] = useState<string>('9SEAT');
@@ -171,33 +190,11 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
 
   // Top Marquee Banner Announcement (Poppo/Bigo style global notice)
   const [marqueeNotice, setMarqueeNotice] = useState<string>(
-    '🚀 [VIP Lv.58] Alex Rivers sent 520x Cyber Sports Cars to Host Aria Nova! Lucky Multiplier 10x (+50,000 Coins)!'
+    '🔥 Welcome! Send gifts, take a seat, and join the conversation.'
   );
 
-  // Live Chat state
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: 'm1',
-      streamId: 'stream_party_1',
-      senderName: 'GamerGod99',
-      senderAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&q=80',
-      senderBadge: 'SILVER VIP',
-      senderWealthLevel: 42,
-      text: 'Poppo party room vibes are electric tonight! 🔥',
-      timestamp: '18:22'
-    },
-    {
-      id: 'm2',
-      streamId: 'stream_party_1',
-      senderName: 'NexAI Co-Host',
-      senderAvatar: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=100&q=80',
-      senderBadge: 'AI BOT',
-      senderWealthLevel: 99,
-      text: 'Welcome to the 9-Seat Party Room! Tap any empty seat to sit down or send gifts to Seat #1!',
-      timestamp: '18:23',
-      isAiCohost: true
-    }
-  ]);
+  // Live Chat state (populated as real messages come in for this stream)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [inputChat, setInputChat] = useState('');
 
   // AI Co-Host State
@@ -226,6 +223,11 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages]);
 
+  // Reset the local chat log whenever the viewer switches rooms
+  useEffect(() => {
+    setChatMessages([]);
+  }, [selectedStream?.id]);
+
   // Toggle Webcam
   const toggleWebcam = async () => {
     if (webcamEnabled) {
@@ -250,7 +252,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
 
   // Take a Seat in Party Room
   const handleTakeSeat = (seatNum: number) => {
-    if (!selectedStream.seats) return;
+    if (!selectedStream?.seats) return;
     const currentSeats = [...selectedStream.seats];
     const targetSeatIdx = currentSeats.findIndex(s => s.seatNumber === seatNum);
 
@@ -263,22 +265,22 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
         // Seat empty, sit down!
         currentSeats[targetSeatIdx] = {
           seatNumber: seatNum,
-          userName: 'Alex Rivers (You)',
-          userAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&q=80',
-          userLevel: 18,
+          userName: `${myDisplayName} (You)`,
+          userAvatar: myAvatarUrl,
+          userLevel: userLevel.currentLevel,
           isMuted: false,
           isCameraOn: true,
           seatGiftsCoins: 0
         };
 
-        setSelectedStream(prev => ({ ...prev, seats: currentSeats }));
+        setSelectedStream(prev => (prev ? { ...prev, seats: currentSeats } : prev));
         const seatMsg: ChatMessage = {
           id: `seat_${Date.now()}`,
           streamId: selectedStream.id,
-          senderName: 'Alex Rivers',
-          senderAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&q=80',
-          senderBadge: 'GOLD VIP',
-          senderWealthLevel: 18,
+          senderName: myDisplayName,
+          senderAvatar: myAvatarUrl,
+          senderBadge: myBadge,
+          senderWealthLevel: userLevel.wealthLevel,
           text: `🎉 Took Seat #${seatNum}! Mic activated.`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
@@ -290,15 +292,15 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
   // Send Chat
   const handleSendChat = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputChat.trim()) return;
+    if (!inputChat.trim() || !selectedStream) return;
 
     const userMsg: ChatMessage = {
       id: `chat_${Date.now()}`,
       streamId: selectedStream.id,
-      senderName: 'Alex Rivers',
-      senderAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&q=80',
-      senderBadge: 'GOLD VIP',
-      senderWealthLevel: 18,
+      senderName: myDisplayName,
+      senderAvatar: myAvatarUrl,
+      senderBadge: myBadge,
+      senderWealthLevel: userLevel.wealthLevel,
       text: inputChat.trim(),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
@@ -348,6 +350,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
 
   // Send Gift with Combos & Seat Target
   const handleSendGiftCombo = (gift: GiftItem) => {
+    if (!selectedStream) return;
     const totalCost = gift.coinPrice * selectedGiftCombo;
     if (wallet.coins < totalCost) {
       alert(`Insufficient Coins! Needed: ${totalCost.toLocaleString()} Coins for ${selectedGiftCombo}x ${gift.name}. Please recharge.`);
@@ -364,13 +367,13 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
           }
           return s;
         });
-        setSelectedStream(prev => ({ ...prev, seats: updatedSeats }));
+        setSelectedStream(prev => (prev ? { ...prev, seats: updatedSeats } : prev));
       }
 
       // Update PK score if PK battle active
       if (selectedStream.pkBattle) {
         setSelectedStream(prev => {
-          if (!prev.pkBattle) return prev;
+          if (!prev?.pkBattle) return prev;
           return {
             ...prev,
             pkBattle: {
@@ -385,10 +388,10 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
       const giftNotice: ChatMessage = {
         id: `gift_combo_${Date.now()}`,
         streamId: selectedStream.id,
-        senderName: 'Alex Rivers',
-        senderAvatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&q=80',
-        senderBadge: 'GOD GIFTER',
-        senderWealthLevel: 18,
+        senderName: myDisplayName,
+        senderAvatar: myAvatarUrl,
+        senderBadge: myBadge,
+        senderWealthLevel: userLevel.wealthLevel,
         text: `🎁 SENT ${selectedGiftCombo}x ${gift.name} ${gift.icon} (${totalCost.toLocaleString()} Coins) to Seat #${targetSeatNumber}!`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         isGiftNotice: true,
@@ -406,7 +409,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
       // Trigger Marquee banner for big combo
       if (selectedGiftCombo >= 10 || gift.coinPrice >= 1000) {
         setMarqueeNotice(
-          `🚀 [VIP Lv.18] Alex Rivers sent ${selectedGiftCombo}x ${gift.name} (${totalCost.toLocaleString()} Coins) to Seat #${targetSeatNumber}!`
+          `🚀 [${myBadge}] ${myDisplayName} sent ${selectedGiftCombo}x ${gift.name} (${totalCost.toLocaleString()} Coins) to Seat #${targetSeatNumber}!`
         );
       }
     }
@@ -437,6 +440,39 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
         if (activeCategory === 'PK_BATTLE') return s.pkBattle?.isPkActive;
         return s.category === activeCategory;
       });
+
+  if (!selectedStream) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-16 flex flex-col items-center justify-center text-center gap-4">
+        {!streamsLoaded ? (
+          <>
+            <div className="w-10 h-10 border-2 border-slate-700 border-t-pink-500 rounded-full animate-spin" />
+            <p className="text-slate-400 text-sm font-medium">Loading live streams…</p>
+          </>
+        ) : (
+          <>
+            <Radio className="w-10 h-10 text-slate-600" />
+            <h3 className="text-lg font-black text-slate-200">
+              {mode === 'PARTY' ? 'No party rooms are live right now' : 'No one is live right now'}
+            </h3>
+            <p className="text-sm text-slate-500 max-w-sm">
+              Be the first — tap "Go Live" to start your own {mode === 'PARTY' ? 'party room' : 'stream'}.
+            </p>
+            {onOpenGoLiveModal && (
+              <button
+                onClick={onOpenGoLiveModal}
+                className="mt-2 px-5 py-2.5 bg-gradient-to-r from-pink-500 via-purple-600 to-amber-500 text-white font-black text-xs rounded-2xl shadow-xl hover:opacity-90 flex items-center gap-2"
+              >
+                <Camera className="w-4 h-4" /> Go Live
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
+
+  const isHost = !!user && selectedStream.creatorId === user.uid;
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-4 space-y-4">
@@ -1789,10 +1825,10 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE' })
           <div className="w-full max-w-xl">
             <LiveModerationPanel
               streamId={selectedStream.id}
-              hostId="alex_rivers"
-              currentUserId="alex_rivers"
-              currentUserName="Alex Rivers"
-              isHostOrMod={true}
+              hostId={selectedStream.creatorId}
+              currentUserId={myUserId}
+              currentUserName={myDisplayName}
+              isHostOrMod={isHost}
               onClose={() => setShowModerationPanel(false)}
             />
           </div>
