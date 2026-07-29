@@ -3,7 +3,7 @@ import { LiveStream, ChatMessage, GiftItem, PartySeat, PkBattleInfo } from '../t
 import { useEconomy } from '../context/EconomyContext';
 import { useAuth } from '../hooks/useAuth';
 import { LiveModerationPanel } from './LiveModerationPanel';
-import { moderationService } from '../services/ModerationService';
+import { moderationService, RoomModerationState } from '../services/ModerationService';
 import { liveStreamService } from '../services/LiveStreamService';
 import { apiFetch } from '../lib/apiConfig';
 import { CreatorStudioView } from './CreatorStudioView';
@@ -172,6 +172,16 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
     };
   }, []);
 
+  // Real-time moderation state (mic/co-host requests) for the currently open stream
+  useEffect(() => {
+    if (!selectedStream?.id) {
+      setModState(null);
+      return;
+    }
+    const unsubMod = moderationService.subscribeToModeration(selectedStream.id, setModState);
+    return () => unsubMod();
+  }, [selectedStream?.id]);
+
   const handleCloseStream = async () => {
     if (selectedStream) {
       if (isHost) {
@@ -255,13 +265,34 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
   const [quickDiceVal, setQuickDiceVal] = useState<number>(6);
   const [isQuickRolling, setIsQuickRolling] = useState(false);
 
-  // Guest Queue State
-  const [guestRequests, setGuestRequests] = useState<
-    { id: string; name: string; avatar: string; level: number }[]
-  >([
-    { id: 'g1', name: 'Sophia Grace', avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=100&q=80', level: 14 },
-    { id: 'g2', name: 'David Chen', avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=100&q=80', level: 22 }
-  ]);
+  // Guest Queue State — backed by the real per-stream moderation document
+  // (moderationService), not local mock data. See guest-join effects below.
+  const [modState, setModState] = useState<RoomModerationState | null>(null);
+  const guestRequests = (modState?.micRequests || []).filter(r => r.status === 'PENDING');
+  const myActiveSeat = selectedStream?.seats?.find(s => s.uid === myUserId) || null;
+  const [guestJoinBusy, setGuestJoinBusy] = useState(false);
+  const [guestPublishing, setGuestPublishing] = useState(false);
+  const wasSeatedRef = useRef(false);
+  const seatVideoRefCache = useRef<Map<number, { uid: string; cb: (el: HTMLDivElement | null) => void }>>(new Map());
+
+  // Stable per-seat ref callback (only recreated when the seat's occupant changes) so
+  // binding a seat's video element doesn't churn on every unrelated re-render (e.g. a
+  // new chat message), which would otherwise cause the guest's video to flicker.
+  const getSeatVideoRef = (seatNumber: number, uid?: string) => {
+    const cached = seatVideoRefCache.current.get(seatNumber);
+    if (cached && cached.uid === (uid || '')) return cached.cb;
+
+    const cb = (el: HTMLDivElement | null) => {
+      if (!uid) return;
+      if (uid === myUserId) {
+        if (el) agoraEngine.getLocalVideoTrack()?.play(el);
+      } else {
+        agoraEngine.bindRemoteVideoElement(uid, el);
+      }
+    };
+    seatVideoRefCache.current.set(seatNumber, { uid: uid || '', cb });
+    return cb;
+  };
 
   // Stream Goal State
   const [streamGoal, setStreamGoal] = useState({ currentCoins: 14200, targetCoins: 20000 });
@@ -323,11 +354,13 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
     }
   }, [webcamEnabled]);
 
-  // Viewers Agora Join
+  // Viewers Agora Join (plain audience mode — skipped for the host and for guests who
+  // are actively publishing from a seat, since they join as a publisher instead; see
+  // the guest auto-join effect below)
   useEffect(() => {
     if (!selectedStream?.id) return;
     const viewerIsHost = !!user && selectedStream.creatorId === user.uid;
-    if (viewerIsHost) return;
+    if (viewerIsHost || myActiveSeat) return;
 
     let unsubscribeRemote: (() => void) | null = null;
     let cancelled = false;
@@ -350,7 +383,102 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
       setRemoteVideoActive(false);
       agoraEngine.leaveChannel();
     };
-  }, [selectedStream?.id, selectedStream?.creatorId, user?.uid]);
+  }, [selectedStream?.id, selectedStream?.creatorId, user?.uid, !!myActiveSeat]);
+
+  // Guest auto-join: once the host approves a mic/seat request (moderationService
+  // micRequests -> APPROVED), the approved guest's own client reacts here by claiming
+  // an open seat and actually publishing camera/mic into the Agora channel. Nothing
+  // upstream of this effect ever did that, which is why an "approved" guest never
+  // actually appeared with video/audio.
+  useEffect(() => {
+    if (!selectedStream?.id || !user?.uid) return;
+    const myRequest = modState?.micRequests?.find(r => r.userId === myUserId && r.status === 'APPROVED');
+    if (!myRequest || guestPublishing || guestJoinBusy || myActiveSeat) return;
+
+    let cancelled = false;
+    setGuestJoinBusy(true);
+
+    (async () => {
+      try {
+        const seatNumber = await liveStreamService.assignNextOpenSeat(selectedStream.id, {
+          uid: myUserId,
+          userName: myDisplayName,
+          userAvatar: myAvatarUrl,
+          userLevel: userLevel.currentLevel
+        });
+        if (cancelled) return;
+        if (seatNumber == null) {
+          console.warn('[LiveStream] Guest was approved but no open seats remain.');
+          return;
+        }
+
+        await agoraEngine.joinChannel(selectedStream.id, 'host', myUserId);
+        if (cancelled) return;
+        setGuestPublishing(true);
+
+        await moderationService.activateCoHost(
+          selectedStream.id,
+          modState?.coHosts || [],
+          modState?.micRequests || [],
+          myUserId,
+          myDisplayName,
+          myAvatarUrl,
+          seatNumber
+        );
+      } catch (err) {
+        console.warn('[LiveStream] Guest auto-join failed:', err);
+      } finally {
+        if (!cancelled) setGuestJoinBusy(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedStream?.id, modState?.micRequests, myUserId, guestPublishing, guestJoinBusy, !!myActiveSeat]);
+
+  // If I'm actively publishing as a seated guest but my seat disappears (host removed
+  // me, or I left from another tab), stop publishing immediately instead of continuing
+  // to broadcast into a room I'm no longer seated in.
+  useEffect(() => {
+    if (!guestPublishing) {
+      wasSeatedRef.current = !!myActiveSeat;
+      return;
+    }
+    if (myActiveSeat) {
+      wasSeatedRef.current = true;
+      return;
+    }
+    if (wasSeatedRef.current) {
+      agoraEngine.leaveChannel();
+      setGuestPublishing(false);
+      wasSeatedRef.current = false;
+    }
+  }, [myActiveSeat, guestPublishing]);
+
+  const handleLeaveSeat = async () => {
+    if (!selectedStream?.id) return;
+    try {
+      await agoraEngine.leaveChannel();
+      setGuestPublishing(false);
+      await liveStreamService.leaveSeat(selectedStream.id, myUserId);
+      await moderationService.removeCoHost(selectedStream.id, modState?.coHosts || [], myUserId, myUserId);
+    } catch (err) {
+      console.warn('[LiveStream] Failed to leave seat:', err);
+    }
+  };
+
+  const handleKickFromSeat = async (seatNumber: number) => {
+    if (!selectedStream?.id) return;
+    try {
+      const removed = await liveStreamService.clearSeat(selectedStream.id, seatNumber);
+      if (removed?.uid) {
+        await moderationService.removeCoHost(selectedStream.id, modState?.coHosts || [], removed.uid, myUserId);
+      }
+    } catch (err) {
+      console.warn('[LiveStream] Failed to remove guest from seat:', err);
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -418,40 +546,51 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
     }
   };
 
-  // Seat taking
-  const handleTakeSeat = (seatNum: number) => {
+  // Seat taking — persists to Firestore via a transaction (so two people tapping the
+  // same empty seat at once can't both "win" it) and actually publishes the guest's
+  // camera/mic into the Agora channel. Previously this only mutated local component
+  // state, so nobody else ever saw the seat fill and no media was ever published.
+  const handleTakeSeat = async (seatNum: number) => {
     if (!selectedStream?.seats) return;
-    const currentSeats = [...selectedStream.seats];
-    const targetSeatIdx = currentSeats.findIndex(s => s.seatNumber === seatNum);
+    const seat = selectedStream.seats.find(s => s.seatNumber === seatNum);
+    if (!seat) return;
 
-    if (targetSeatIdx !== -1) {
-      if (currentSeats[targetSeatIdx].userName) {
-        setTargetSeatNumber(seatNum);
-        setActiveSheet('GIFT');
-      } else {
-        currentSeats[targetSeatIdx] = {
-          seatNumber: seatNum,
-          userName: `${myDisplayName} (You)`,
-          userAvatar: myAvatarUrl,
-          userLevel: userLevel.currentLevel,
-          isMuted: false,
-          isCameraOn: true,
-          seatGiftsCoins: 0
-        };
+    if (seat.userName) {
+      setTargetSeatNumber(seatNum);
+      setActiveSheet('GIFT');
+      return;
+    }
 
-        setSelectedStream(prev => (prev ? { ...prev, seats: currentSeats } : prev));
-        const seatMsg: ChatMessage = {
-          id: `seat_${Date.now()}`,
-          streamId: selectedStream.id,
-          senderName: myDisplayName,
-          senderAvatar: myAvatarUrl,
-          senderBadge: myBadge,
-          senderWealthLevel: userLevel.wealthLevel,
-          text: `🎉 Took Seat #${seatNum}! Mic activated.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-        setChatMessages(prev => [...prev, seatMsg]);
-      }
+    if (myActiveSeat || guestJoinBusy) return;
+
+    setGuestJoinBusy(true);
+    try {
+      const acquired = await liveStreamService.takeSeat(selectedStream.id, seatNum, {
+        uid: myUserId,
+        userName: myDisplayName,
+        userAvatar: myAvatarUrl,
+        userLevel: userLevel.currentLevel
+      });
+      if (!acquired) return; // someone else took this seat first
+
+      await agoraEngine.joinChannel(selectedStream.id, 'host', myUserId);
+      setGuestPublishing(true);
+
+      const seatMsg: ChatMessage = {
+        id: `seat_${Date.now()}`,
+        streamId: selectedStream.id,
+        senderName: myDisplayName,
+        senderAvatar: myAvatarUrl,
+        senderBadge: myBadge,
+        senderWealthLevel: userLevel.wealthLevel,
+        text: `🎉 Took Seat #${seatNum}! Mic activated.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      };
+      setChatMessages(prev => [...prev, seatMsg]);
+    } catch (err) {
+      console.warn('[LiveStream] Failed to take seat:', err);
+    } finally {
+      setGuestJoinBusy(false);
     }
   };
 
@@ -1299,19 +1438,39 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
                       #{seat.seatNumber} {seat.isHost ? 'HOST' : ''}
                     </span>
 
+                    {(isHost || seat.uid === myUserId) && seat.userName && !seat.isHost && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (seat.uid === myUserId) handleLeaveSeat();
+                          else handleKickFromSeat(seat.seatNumber);
+                        }}
+                        title={seat.uid === myUserId ? 'Leave seat' : 'Remove from seat'}
+                        className="absolute top-1 right-1 p-0.5 bg-slate-950/80 text-slate-400 hover:text-rose-400 rounded-full z-10"
+                      >
+                        <UserX className="w-3 h-3" />
+                      </button>
+                    )}
+
                     {seat.userName ? (
                       <>
-                        <div className="relative mt-2">
+                        <div className="relative mt-2 w-10 h-10 rounded-full overflow-hidden ring-2 ring-amber-400 shadow-lg bg-slate-800">
                           <img
                             src={seat.userAvatar}
                             alt={seat.userName}
-                            className="w-10 h-10 rounded-full object-cover ring-2 ring-amber-400 shadow-lg"
+                            className="absolute inset-0 w-10 h-10 rounded-full object-cover"
                             referrerPolicy="no-referrer"
                           />
+                          {seat.uid && seat.isCameraOn !== false && (
+                            <div
+                              ref={getSeatVideoRef(seat.seatNumber, seat.uid)}
+                              className="absolute inset-0 [&>video]:!w-full [&>video]:!h-full [&>video]:object-cover"
+                            />
+                          )}
                           {seat.isMuted ? (
-                            <MicOff className="w-3 h-3 text-red-400 absolute bottom-0 right-0 bg-slate-950 rounded-full p-0.5 border border-red-500" />
+                            <MicOff className="w-3 h-3 text-red-400 absolute bottom-0 right-0 bg-slate-950 rounded-full p-0.5 border border-red-500 z-10" />
                           ) : (
-                            <Mic className="w-3 h-3 text-emerald-400 absolute bottom-0 right-0 bg-slate-950 rounded-full p-0.5 border border-emerald-500" />
+                            <Mic className="w-3 h-3 text-emerald-400 absolute bottom-0 right-0 bg-slate-950 rounded-full p-0.5 border border-emerald-500 z-10" />
                           )}
                         </div>
                         <span className="text-[11px] font-extrabold text-slate-100 line-clamp-1 max-w-[80px]">
@@ -1324,7 +1483,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
                     ) : (
                       <div className="py-1.5 flex flex-col items-center justify-center text-slate-500 space-y-0.5">
                         <UserPlus className="w-5 h-5 text-slate-400" />
-                        <span className="text-[9px] font-bold">Sit Down</span>
+                        <span className="text-[9px] font-bold">{guestJoinBusy ? 'Joining…' : 'Sit Down'}</span>
                       </div>
                     )}
                   </div>
@@ -1822,36 +1981,46 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
             </button>
           </div>
 
+          {!isHost && !myActiveSeat && (
+            <button
+              disabled={guestJoinBusy || guestRequests.some(r => r.userId === myUserId)}
+              onClick={() => {
+                if (!selectedStream) return;
+                moderationService.submitMicRequest(selectedStream.id, modState?.micRequests || [], myUserId, myDisplayName, myAvatarUrl);
+              }}
+              className="w-full py-2.5 bg-pink-600 disabled:bg-slate-800 disabled:text-slate-500 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-1.5"
+            >
+              <UserPlus className="w-4 h-4" />
+              {guestRequests.some(r => r.userId === myUserId) ? 'Request Sent — Waiting for Host' : 'Request to Join as Guest'}
+            </button>
+          )}
+
           {guestRequests.length === 0 ? (
             <p className="text-xs text-slate-400 text-center py-6">No pending guest requests right now.</p>
           ) : (
             <div className="space-y-2">
               {guestRequests.map(req => (
-                <div key={req.id} className="p-3 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between gap-3">
+                <div key={req.userId} className="p-3 bg-slate-950 rounded-2xl border border-slate-800 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2.5">
-                    <img src={req.avatar} alt={req.name} className="w-9 h-9 rounded-full object-cover ring-2 ring-pink-500" />
-                    <div>
-                      <span className="font-extrabold text-xs text-slate-100 block">{req.name}</span>
-                      <span className="text-[10px] text-amber-400 font-bold">Level {req.level}</span>
+                    <img src={req.userAvatar} alt={req.userName} className="w-9 h-9 rounded-full object-cover ring-2 ring-pink-500" referrerPolicy="no-referrer" />
+                    <span className="font-extrabold text-xs text-slate-100 block">{req.userName}</span>
+                  </div>
+                  {isHost && (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => moderationService.handleMicRequest(selectedStream!.id, modState?.micRequests || [], req.userId, true, myUserId)}
+                        className="px-3 py-1.5 bg-emerald-600 text-white font-extrabold text-xs rounded-xl flex items-center gap-1"
+                      >
+                        <UserCheck className="w-3.5 h-3.5" /> Approve
+                      </button>
+                      <button
+                        onClick={() => moderationService.handleMicRequest(selectedStream!.id, modState?.micRequests || [], req.userId, false, myUserId)}
+                        className="p-1.5 bg-slate-800 text-slate-400 hover:text-rose-400 rounded-xl"
+                      >
+                        <UserX className="w-4 h-4" />
+                      </button>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => {
-                        setGuestRequests(prev => prev.filter(r => r.id !== req.id));
-                        alert(`Approved ${req.name} to join seat!`);
-                      }}
-                      className="px-3 py-1.5 bg-emerald-600 text-white font-extrabold text-xs rounded-xl flex items-center gap-1"
-                    >
-                      <UserCheck className="w-3.5 h-3.5" /> Approve
-                    </button>
-                    <button
-                      onClick={() => setGuestRequests(prev => prev.filter(r => r.id !== req.id))}
-                      className="p-1.5 bg-slate-800 text-slate-400 hover:text-rose-400 rounded-xl"
-                    >
-                      <UserX className="w-4 h-4" />
-                    </button>
-                  </div>
+                  )}
                 </div>
               ))}
             </div>
