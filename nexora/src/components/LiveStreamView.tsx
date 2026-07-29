@@ -182,17 +182,34 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
     return () => unsubMod();
   }, [selectedStream?.id]);
 
+  // Leaving the room used to just null out `selectedStream` and rely on every effect's
+  // cleanup to happen to fire correctly on the way out. It didn't always: a seated
+  // guest's camera/mic could keep publishing into Agora in the background, their seat
+  // stayed occupied in Firestore forever, and a stale sheet/webcam flag could linger —
+  // which is why leaving only fully "worked" after a hard page refresh. Every step
+  // below is independently try/caught so one failure (e.g. offline) never blocks exit.
   const handleCloseStream = async () => {
-    if (selectedStream) {
-      if (isHost) {
-        try {
-          await liveStreamService.endStream(selectedStream.id);
-        } catch (err) {
-          console.warn('Failed to end stream:', err);
-        }
-      }
-      setSelectedStream(null);
+    if (!selectedStream) return;
+    const streamId = selectedStream.id;
+
+    if (guestPublishing || myActiveSeat) {
+      try { await agoraEngine.leaveChannel(); } catch (err) { console.warn('Leave (guest) Agora cleanup warning:', err); }
+      try { await liveStreamService.leaveSeat(streamId, myUserId); } catch (err) { console.warn('Leave seat cleanup warning:', err); }
+      try { await moderationService.removeCoHost(streamId, modState?.coHosts || [], myUserId, myUserId); } catch (err) { console.warn('Remove co-host cleanup warning:', err); }
     }
+
+    if (webcamEnabled) {
+      try { await agoraEngine.leaveChannel(); } catch (err) { console.warn('Leave (host webcam) Agora cleanup warning:', err); }
+    }
+
+    if (isHost) {
+      try { await liveStreamService.endStream(streamId); } catch (err) { console.warn('Failed to end stream:', err); }
+    }
+
+    setGuestPublishing(false);
+    setWebcamEnabled(false);
+    setActiveSheet('NONE');
+    setSelectedStream(null);
   };
 
   // Jump to created stream on "Go Live"
@@ -270,6 +287,14 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
   const [modState, setModState] = useState<RoomModerationState | null>(null);
   const guestRequests = (modState?.micRequests || []).filter(r => r.status === 'PENDING');
   const myActiveSeat = selectedStream?.seats?.find(s => s.uid === myUserId) || null;
+  // Only party/multi-guest rooms have an on-camera guest stage. A Solo Live stream
+  // has no seats at all — viewers there should only ever see video + chat + gifting,
+  // never a "become a guest" prompt.
+  const supportsGuests = !!selectedStream?.isPartyRoom;
+  // Multi-Guest rooms are a video conference: every seat should show a full camera
+  // tile, not the small avatar-circle used by voice-focused party/karaoke rooms.
+  const isConferenceMode = selectedStream?.category === 'MULTI_GUEST';
+  const [controlsVisible, setControlsVisible] = useState(false);
   const [guestJoinBusy, setGuestJoinBusy] = useState(false);
   const [guestPublishing, setGuestPublishing] = useState(false);
   const wasSeatedRef = useRef(false);
@@ -323,6 +348,9 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
 
   useEffect(() => {
     setChatMessages([]);
+    // A bottom sheet left open from a previous room (e.g. Guest Queue in a party
+    // room) must not carry over when jumping straight into a different stream.
+    setActiveSheet('NONE');
   }, [selectedStream?.id]);
 
   // Toggle Webcam
@@ -391,7 +419,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
   // upstream of this effect ever did that, which is why an "approved" guest never
   // actually appeared with video/audio.
   useEffect(() => {
-    if (!selectedStream?.id || !user?.uid) return;
+    if (!selectedStream?.id || !user?.uid || !supportsGuests) return;
     const myRequest = modState?.micRequests?.find(r => r.userId === myUserId && r.status === 'APPROVED');
     if (!myRequest || guestPublishing || guestJoinBusy || myActiveSeat) return;
 
@@ -435,7 +463,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
     return () => {
       cancelled = true;
     };
-  }, [selectedStream?.id, modState?.micRequests, myUserId, guestPublishing, guestJoinBusy, !!myActiveSeat]);
+  }, [selectedStream?.id, modState?.micRequests, myUserId, guestPublishing, guestJoinBusy, !!myActiveSeat, supportsGuests]);
 
   // If I'm actively publishing as a seated guest but my seat disappears (host removed
   // me, or I left from another tab), stop publishing immediately instead of continuing
@@ -455,6 +483,21 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
       wasSeatedRef.current = false;
     }
   }, [myActiveSeat, guestPublishing]);
+
+  // Single source of truth for a seated guest's mute state is the seat's Firestore
+  // isMuted flag — this keeps the actual Agora mic mute in sync whether the toggle
+  // came from the guest themselves or was force-applied by the host.
+  useEffect(() => {
+    if (!guestPublishing) return;
+    agoraEngine.setMicMuted(!!myActiveSeat?.isMuted);
+  }, [myActiveSeat?.isMuted, guestPublishing]);
+
+  const handleToggleSeatMute = (seatNumber: number, currentlyMuted: boolean | undefined) => {
+    if (!selectedStream?.id) return;
+    liveStreamService.setSeatMuted(selectedStream.id, seatNumber, !currentlyMuted).catch(err =>
+      console.warn('[LiveStream] Failed to toggle seat mute:', err)
+    );
+  };
 
   const handleLeaveSeat = async () => {
     if (!selectedStream?.id) return;
@@ -1402,8 +1445,9 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
           <div className="space-y-3 bg-slate-950/50 backdrop-blur-xl border border-white/10 rounded-3xl p-4 shadow-2xl">
             <div className="flex items-center justify-between border-b border-white/10 pb-2">
               <span className="text-xs font-black text-slate-100 flex items-center gap-1.5">
-                🎙️ 9-Seat Voice Party • {partyTheme} Theme
+                {isConferenceMode ? '🎥 Multi-Guest Video Conference' : `🎙️ 9-Seat Voice Party • ${partyTheme} Theme`}
               </span>
+              {!isConferenceMode && (
               <div className="flex items-center gap-1">
                 {['KARAOKE', 'DATING', 'CHILL'].map(t => (
                   <button
@@ -1417,9 +1461,10 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
                   </button>
                 ))}
               </div>
+              )}
             </div>
 
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className={isConferenceMode ? 'grid grid-cols-2 gap-2.5' : 'grid grid-cols-3 gap-2.5'}>
               {selectedStream.seats.map(seat => {
                 const isTargeted = targetSeatNumber === seat.seatNumber;
                 return (
@@ -1454,11 +1499,14 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
 
                     {seat.userName ? (
                       <>
-                        <div className="relative mt-2 w-10 h-10 rounded-full overflow-hidden ring-2 ring-amber-400 shadow-lg bg-slate-800">
+                        <div className={isConferenceMode
+                          ? 'relative w-full aspect-video rounded-xl overflow-hidden ring-1 ring-white/15 shadow-lg bg-slate-800'
+                          : 'relative mt-2 w-10 h-10 rounded-full overflow-hidden ring-2 ring-amber-400 shadow-lg bg-slate-800'
+                        }>
                           <img
                             src={seat.userAvatar}
                             alt={seat.userName}
-                            className="absolute inset-0 w-10 h-10 rounded-full object-cover"
+                            className={isConferenceMode ? 'absolute inset-0 w-full h-full object-cover' : 'absolute inset-0 w-10 h-10 rounded-full object-cover'}
                             referrerPolicy="no-referrer"
                           />
                           {seat.uid && seat.isCameraOn !== false && (
@@ -1467,13 +1515,28 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
                               className="absolute inset-0 [&>video]:!w-full [&>video]:!h-full [&>video]:object-cover"
                             />
                           )}
-                          {seat.isMuted ? (
+                          {isConferenceMode && (
+                            <span className="absolute bottom-1 left-1 px-1.5 py-0.2 bg-slate-950/80 text-slate-100 text-[9px] font-bold rounded truncate max-w-[75%]">
+                              {seat.userName}
+                            </span>
+                          )}
+                          {(isHost || seat.uid === myUserId) ? (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleToggleSeatMute(seat.seatNumber, seat.isMuted); }}
+                              title={seat.isMuted ? 'Unmute' : 'Mute'}
+                              className={`absolute bottom-0 right-0 rounded-full p-0.5 border z-10 ${
+                                seat.isMuted ? 'bg-slate-950 border-red-500' : 'bg-slate-950 border-emerald-500'
+                              }`}
+                            >
+                              {seat.isMuted ? <MicOff className="w-3 h-3 text-red-400" /> : <Mic className="w-3 h-3 text-emerald-400" />}
+                            </button>
+                          ) : seat.isMuted ? (
                             <MicOff className="w-3 h-3 text-red-400 absolute bottom-0 right-0 bg-slate-950 rounded-full p-0.5 border border-red-500 z-10" />
                           ) : (
                             <Mic className="w-3 h-3 text-emerald-400 absolute bottom-0 right-0 bg-slate-950 rounded-full p-0.5 border border-emerald-500 z-10" />
                           )}
                         </div>
-                        <span className="text-[11px] font-extrabold text-slate-100 line-clamp-1 max-w-[80px]">
+                        <span className={isConferenceMode ? 'hidden' : 'text-[11px] font-extrabold text-slate-100 line-clamp-1 max-w-[80px]'}>
                           {seat.userName}
                         </span>
                         <span className="text-[9px] font-black text-amber-300">
@@ -1564,8 +1627,22 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
         ) : null}
       </div>
 
-      {/* 4. RIGHT SIDE VERTICALLY ALIGNED FLOATING ACTION BUTTONS RAIL */}
+      {/* 4. RIGHT SIDE VERTICALLY ALIGNED FLOATING ACTION BUTTONS RAIL — hidden by
+          default behind a single toggle so the video isn't permanently covered by
+          9 icon buttons; tap the toggle to reveal/hide the rest. */}
       <div className="absolute right-3 top-20 z-30 flex flex-col items-center gap-2.5 pointer-events-auto">
+        <button
+          onClick={() => setControlsVisible(v => !v)}
+          title={controlsVisible ? 'Hide controls' : 'Show controls'}
+          className={`w-10 h-10 rounded-full backdrop-blur-xl border border-white/15 flex items-center justify-center transition-all shadow-xl ${
+            controlsVisible ? 'bg-pink-600' : 'bg-slate-950/70 hover:bg-slate-800'
+          }`}
+        >
+          {controlsVisible ? <X className="w-5 h-5 text-white" /> : <MoreHorizontal className="w-5 h-5 text-slate-100" />}
+        </button>
+
+        {controlsVisible && (
+        <>
         {isHost && (
           <button
             onClick={toggleWebcam}
@@ -1587,6 +1664,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
           </button>
         )}
 
+        {supportsGuests && (
         <button
           onClick={() => setActiveSheet(activeSheet === 'GUESTS' ? 'NONE' : 'GUESTS')}
           title="Guest Requests Queue"
@@ -1599,6 +1677,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
             </span>
           )}
         </button>
+        )}
 
         <button
           onClick={() => setActiveSheet(activeSheet === 'MUSIC' ? 'NONE' : 'MUSIC')}
@@ -1661,6 +1740,8 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
         >
           <Plus className="w-5 h-5 text-slate-100" />
         </button>
+        </>
+        )}
       </div>
 
       {/* 5. OVERLAID TRANSLUCENT CHAT LOG (LOWER-LEFT) */}
@@ -1969,7 +2050,7 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
       )}
 
       {/* D. GUEST QUEUE BOTTOM SHEET */}
-      {activeSheet === 'GUESTS' && (
+      {activeSheet === 'GUESTS' && supportsGuests && (
         <div className="absolute inset-x-0 bottom-0 z-[70] bg-slate-900/95 backdrop-blur-2xl border-t border-pink-500/40 rounded-t-3xl p-4 shadow-2xl animate-fade-in space-y-4 max-h-[75vh] overflow-y-auto">
           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
             <div className="flex items-center gap-2">

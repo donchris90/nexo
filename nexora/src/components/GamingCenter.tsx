@@ -50,6 +50,72 @@ import {
   Layers
 } from 'lucide-react';
 
+type UnoCard = { color: string; val: string };
+
+/** Builds and shuffles a real 108-card UNO deck. */
+function buildUnoDeck(): UnoCard[] {
+  const colors = ['red', 'blue', 'green', 'yellow'];
+  const values = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'Skip', 'Reverse', '+2'];
+  const deck: UnoCard[] = [];
+
+  colors.forEach(c => {
+    values.forEach(v => {
+      deck.push({ color: c, val: v });
+      if (v !== '0') deck.push({ color: c, val: v });
+    });
+    deck.push({ color: 'wild', val: 'Wild' });
+    deck.push({ color: 'wild', val: '+4' });
+  });
+
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
+
+/** A card is playable if it's Wild, matches the active color, or matches the top card's value. */
+function isUnoCardPlayable(card: UnoCard, topCard: UnoCard, activeColor: string): boolean {
+  return card.color === 'wild' || card.color === activeColor || card.val === topCard.val;
+}
+
+/**
+ * Simple but competent Tic-Tac-Toe AI: win if possible, else block the opponent's
+ * winning move, else take the center, else a corner, else whatever's left. This
+ * replaces a purely random AI move so the game is an actual contest.
+ */
+function pickTicTacToeAiMove(grid: Array<string | null>, aiSymbol: 'X' | 'O'): number {
+  const humanSymbol = aiSymbol === 'X' ? 'O' : 'X';
+  const wins = [
+    [0, 1, 2], [3, 4, 5], [6, 7, 8],
+    [0, 3, 6], [1, 4, 7], [2, 5, 8],
+    [0, 4, 8], [2, 4, 6]
+  ];
+  const empty = grid.map((v, i) => (v === null ? i : -1)).filter(i => i !== -1);
+
+  const findWinningMove = (symbol: string) => {
+    for (const idx of empty) {
+      const trial = [...grid];
+      trial[idx] = symbol;
+      if (wins.some(combo => combo.every(i => trial[i] === symbol))) return idx;
+    }
+    return null;
+  };
+
+  const winMove = findWinningMove(aiSymbol);
+  if (winMove !== null) return winMove;
+
+  const blockMove = findWinningMove(humanSymbol);
+  if (blockMove !== null) return blockMove;
+
+  if (grid[4] === null) return 4;
+
+  const corners = [0, 2, 6, 8].filter(i => grid[i] === null);
+  if (corners.length > 0) return corners[Math.floor(Math.random() * corners.length)];
+
+  return empty[Math.floor(Math.random() * empty.length)];
+}
+
 export const GamingCenter: React.FC = () => {
   const { wallet, updateGamePoints, authUser } = useEconomy();
 
@@ -112,15 +178,18 @@ export const GamingCenter: React.FC = () => {
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [quizResult, setQuizResult] = useState<string | null>(null);
 
-  // Uno Blitz
-  const [unoPlayerHand, setUnoPlayerHand] = useState<Array<{ color: string; val: string }>>([
-    { color: 'red', val: '7' },
-    { color: 'blue', val: 'Wild' },
-    { color: 'green', val: '4' },
-    { color: 'yellow', val: '+2' }
-  ]);
-  const [unoTopCard, setUnoTopCard] = useState<{ color: string; val: string }>({ color: 'red', val: '5' });
-  const [unoMessage, setUnoMessage] = useState<string>('Match color or number!');
+  // Uno Blitz — real 108-card deck, real hand deals, real rule enforcement vs an AI
+  // opponent (previously this let you play any card with no validation at all).
+  const [unoDeck, setUnoDeck] = useState<UnoCard[]>([]);
+  const [unoPlayerHand, setUnoPlayerHand] = useState<UnoCard[]>([]);
+  const [unoAiHand, setUnoAiHand] = useState<UnoCard[]>([]);
+  const [unoTopCard, setUnoTopCard] = useState<UnoCard>({ color: 'red', val: '5' });
+  const [unoActiveColor, setUnoActiveColor] = useState<string>('red');
+  const [unoTurn, setUnoTurn] = useState<'PLAYER' | 'AI'>('PLAYER');
+  const [unoPendingWildIndex, setUnoPendingWildIndex] = useState<number | null>(null);
+  const [unoRoundOver, setUnoRoundOver] = useState<boolean>(false);
+  const [unoAiTurnTick, setUnoAiTurnTick] = useState<number>(0);
+  const [unoMessage, setUnoMessage] = useState<string>('Tap "New Round" to deal in.');
 
   // Coin Flip State
   const [coinPick, setCoinPick] = useState<'HEADS' | 'TAILS'>('HEADS');
@@ -233,6 +302,13 @@ export const GamingCenter: React.FC = () => {
     if (activeGameId === 'TRIVIA_QUIZ' && !quizQuestion) {
       handleFetchQuiz();
     }
+  }, [activeGameId]);
+
+  useEffect(() => {
+    if (activeGameId === 'UNO' && unoPlayerHand.length === 0 && unoAiHand.length === 0) {
+      dealUnoRound();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeGameId]);
 
   // Quick Match search handler
@@ -396,6 +472,277 @@ export const GamingCenter: React.FC = () => {
       setLudoMessage(`${nextColor} Turn! Roll the dice to move.`);
     }
   };
+
+  // AI auto-play for every seat except RED (you). Previously the board just sat on
+  // "GREEN Turn!" etc. forever since nothing but a human click ever advanced a
+  // non-RED color — the game was unplayable past your own first turn.
+  const [ludoAiTurnTick, setLudoAiTurnTick] = useState(0);
+  useEffect(() => {
+    if (activeGameId !== 'LUDO' || ludoTurnColor === 'RED' || ludoMessage.includes('VICTORY')) return;
+
+    const timer = setTimeout(() => {
+      const color = ludoTurnColor;
+      const dice = Math.floor(Math.random() * 6) + 1;
+      const tokens = ludoTokensState[color];
+      const safeCells = [0, 8, 13, 21, 26, 34, 39, 47];
+      const colors: ('RED' | 'GREEN' | 'YELLOW' | 'BLUE')[] = ['RED', 'GREEN', 'YELLOW', 'BLUE'];
+      const advanceToNextColor = () => setLudoTurnColor(colors[(colors.indexOf(color) + 1) % 4]);
+
+      const legalTokenIdxs = tokens
+        .map((pos, idx) => ({ pos, idx }))
+        .filter(({ pos }) => (pos === -1 && dice === 6) || (pos >= 0 && pos + dice <= 106));
+
+      if (legalTokenIdxs.length === 0) {
+        setLudoDice(dice);
+        setLudoMessage(`${color} rolled a ${dice}. No legal moves — turn passes.`);
+        advanceToNextColor();
+        return;
+      }
+
+      // Prefer a capture, then releasing from Home, then the most-advanced token.
+      const withNewPos = legalTokenIdxs.map(({ pos, idx }) => ({ idx, pos, newPos: pos === -1 ? 0 : pos + dice }));
+      const captureMove = withNewPos.find(({ newPos }) =>
+        newPos >= 0 && newPos <= 51 && !safeCells.includes(newPos) &&
+        colors.some(c => c !== color && ludoTokensState[c].includes(newPos))
+      );
+      const releaseMove = withNewPos.find(({ pos }) => pos === -1);
+      const bestMove = captureMove || releaseMove || withNewPos.sort((a, b) => b.pos - a.pos)[0];
+
+      const updatedTokens = [...tokens];
+      updatedTokens[bestMove.idx] = bestMove.newPos;
+
+      let captured = false;
+      const nextState = { ...ludoTokensState, [color]: updatedTokens };
+      if (bestMove.newPos >= 0 && bestMove.newPos <= 51 && !safeCells.includes(bestMove.newPos)) {
+        colors.forEach(c => {
+          if (c === color) return;
+          nextState[c] = nextState[c].map(p => {
+            if (p === bestMove.newPos) { captured = true; return -1; }
+            return p;
+          });
+        });
+      }
+
+      setLudoTokensState(nextState);
+      setLudoDice(dice);
+
+      const isWinner = updatedTokens.every(p => p === 106);
+      if (isWinner) {
+        setLudoMessage(`💔 ${color} (AI) won this round! Reset to try again.`);
+        return;
+      }
+
+      const extraTurn = dice === 6 || captured;
+      if (extraTurn) {
+        setLudoMessage(`${color} rolled a ${dice}${captured ? ' and captured a token' : ''} — bonus turn!`);
+        setLudoAiTurnTick(t => t + 1); // ludoTurnColor is unchanged, force this effect to run again
+      } else {
+        setLudoMessage(`${color} moved to #${bestMove.newPos}.`);
+        advanceToNextColor();
+      }
+    }, 900);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGameId, ludoTurnColor, ludoAiTurnTick]);
+
+  // Deal a fresh Uno round: real shuffled deck, real 7-card hands each, and a
+  // guaranteed non-Wild starting card so the required color is never ambiguous.
+  const dealUnoRound = () => {
+    const deck = buildUnoDeck();
+    const playerHand = deck.splice(0, 7);
+    const aiHand = deck.splice(0, 7);
+
+    let topCard = deck.pop() || { color: 'red', val: '7' };
+    const setAside: UnoCard[] = [];
+    while (topCard.color === 'wild' && deck.length > 0) {
+      setAside.push(topCard);
+      topCard = deck.pop()!;
+    }
+    deck.push(...setAside);
+
+    setUnoDeck(deck);
+    setUnoPlayerHand(playerHand);
+    setUnoAiHand(aiHand);
+    setUnoTopCard(topCard);
+    setUnoActiveColor(topCard.color);
+    setUnoTurn('PLAYER');
+    setUnoPendingWildIndex(null);
+    setUnoRoundOver(false);
+    setUnoMessage('Your turn! Match the color or number.');
+  };
+
+  // Applies a played card's special effect. In this 1v1 layout Skip/Reverse/+2/+4
+  // all skip the only opponent, so the turn always returns to whoever played them.
+  const applyUnoCardEffect = (card: UnoCard, chosenColor: string | undefined, playerIsActor: boolean) => {
+    const opponentHand = playerIsActor ? unoAiHand : unoPlayerHand;
+    const setOpponentHand = playerIsActor ? setUnoAiHand : setUnoPlayerHand;
+    const deck = [...unoDeck];
+    let forcedDraw = 0;
+    let effectMsg = '';
+
+    if (card.val === '+2') { forcedDraw = 2; effectMsg = ' — opponent draws 2 and is skipped!'; }
+    else if (card.val === '+4') { forcedDraw = 4; effectMsg = ' — opponent draws 4 and is skipped!'; }
+    else if (card.val === 'Skip') { effectMsg = ' — opponent is skipped!'; }
+    else if (card.val === 'Reverse') { effectMsg = ' — acts as Skip in 1v1!'; }
+
+    if (forcedDraw > 0 && deck.length > 0) {
+      const drawn = deck.splice(Math.max(0, deck.length - forcedDraw), forcedDraw);
+      setOpponentHand([...opponentHand, ...drawn]);
+      setUnoDeck(deck);
+    }
+
+    const activeColor = card.color === 'wild' ? (chosenColor || 'red') : card.color;
+    setUnoActiveColor(activeColor);
+    setUnoTopCard(card);
+    return effectMsg;
+  };
+
+  const finishUnoTurn = (winnerLabel: 'YOU' | 'AI' | null) => {
+    if (winnerLabel === 'YOU') {
+      updateGamePoints(800, 'UNO Victory!', 'Uno Color Blitz');
+      setUnoMessage('🎉 UNO VICTORY! You cleared your hand and won +800 Points!');
+      setUnoRoundOver(true);
+      return;
+    }
+    if (winnerLabel === 'AI') {
+      setUnoMessage('💔 CyberGamer cleared their hand first. Try another round!');
+      setUnoRoundOver(true);
+      return;
+    }
+  };
+
+  const handlePlayUnoCard = (index: number) => {
+    if (unoTurn !== 'PLAYER' || unoRoundOver || unoPendingWildIndex !== null) return;
+    const card = unoPlayerHand[index];
+    if (!isUnoCardPlayable(card, unoTopCard, unoActiveColor)) {
+      setUnoMessage(`Can't play ${card.color.toUpperCase()} ${card.val} — it doesn't match ${unoActiveColor.toUpperCase()} or ${unoTopCard.val}.`);
+      return;
+    }
+    if (card.color === 'wild') {
+      setUnoPendingWildIndex(index);
+      setUnoMessage('Choose a color for your Wild card.');
+      return;
+    }
+    playUnoCardAt(index, undefined);
+  };
+
+  const playUnoCardAt = (index: number, chosenColor: string | undefined) => {
+    const card = unoPlayerHand[index];
+    const nextHand = unoPlayerHand.filter((_c, i) => i !== index);
+    setUnoPlayerHand(nextHand);
+    setUnoPendingWildIndex(null);
+
+    if (nextHand.length === 0) {
+      setUnoTopCard(card);
+      finishUnoTurn('YOU');
+      return;
+    }
+
+    const effectMsg = applyUnoCardEffect(card, chosenColor, true);
+    setUnoMessage(`You played ${(card.color === 'wild' ? chosenColor : card.color)?.toUpperCase()} ${card.val}${effectMsg}`);
+    setUnoTurn(effectMsg ? 'PLAYER' : 'AI');
+  };
+
+  const handleUnoChooseColor = (color: string) => {
+    if (unoPendingWildIndex === null) return;
+    playUnoCardAt(unoPendingWildIndex, color);
+  };
+
+  const handleUnoDrawCard = () => {
+    if (unoTurn !== 'PLAYER' || unoRoundOver || unoPendingWildIndex !== null) return;
+    if (unoDeck.length === 0) {
+      setUnoMessage('Deck is empty — turn passes.');
+      setUnoTurn('AI');
+      return;
+    }
+    const deck = [...unoDeck];
+    const [drawn] = deck.splice(deck.length - 1, 1);
+    setUnoDeck(deck);
+    setUnoPlayerHand([...unoPlayerHand, drawn]);
+    setUnoMessage(`Drew ${drawn.color.toUpperCase()} ${drawn.val}. Turn passes.`);
+    setUnoTurn('AI');
+  };
+
+  // AI's turn: play the first valid card (preferring a non-Wild match so Wilds are
+  // saved for when nothing else fits), else draw up to 3 times looking for a play,
+  // else pass. Runs automatically — nothing to click.
+  useEffect(() => {
+    if (activeGameId !== 'UNO' || unoTurn !== 'AI' || unoRoundOver) return;
+
+    const timer = setTimeout(() => {
+      let hand = [...unoAiHand];
+      let deck = [...unoDeck];
+      let topCard = unoTopCard;
+      let activeColor = unoActiveColor;
+      let drawsLeft = 3;
+
+      let playIdx = hand.findIndex(c => c.color !== 'wild' && isUnoCardPlayable(c, topCard, activeColor));
+      if (playIdx === -1) playIdx = hand.findIndex(c => isUnoCardPlayable(c, topCard, activeColor));
+
+      while (playIdx === -1 && drawsLeft > 0 && deck.length > 0) {
+        const [drawn] = deck.splice(deck.length - 1, 1);
+        hand = [...hand, drawn];
+        drawsLeft--;
+        if (isUnoCardPlayable(drawn, topCard, activeColor)) playIdx = hand.length - 1;
+      }
+
+      setUnoDeck(deck);
+
+      if (playIdx === -1) {
+        setUnoAiHand(hand);
+        setUnoMessage('CyberGamer drew and passed. Your turn!');
+        setUnoTurn('PLAYER');
+        return;
+      }
+
+      const card = hand[playIdx];
+      const remainingHand = hand.filter((_c, i) => i !== playIdx);
+
+      if (remainingHand.length === 0) {
+        setUnoAiHand(remainingHand);
+        setUnoTopCard(card);
+        finishUnoTurn('AI');
+        return;
+      }
+
+      // Simple color choice for AI Wilds: whichever color it holds the most of.
+      const colorCounts: Record<string, number> = { red: 0, blue: 0, green: 0, yellow: 0 };
+      remainingHand.forEach(c => { if (c.color !== 'wild') colorCounts[c.color] = (colorCounts[c.color] || 0) + 1; });
+      const aiChosenColor = Object.entries(colorCounts).sort((a, b) => b[1] - a[1])[0][0];
+
+      const opponentHand = unoPlayerHand;
+      const setOpponentHand = setUnoPlayerHand;
+      let forcedDraw = 0;
+      if (card.val === '+2') forcedDraw = 2;
+      else if (card.val === '+4') forcedDraw = 4;
+
+      let finalDeck = deck;
+      if (forcedDraw > 0 && finalDeck.length > 0) {
+        const forced = finalDeck.splice(Math.max(0, finalDeck.length - forcedDraw), forcedDraw);
+        setOpponentHand([...opponentHand, ...forced]);
+        setUnoDeck(finalDeck);
+      }
+
+      const nextActiveColor = card.color === 'wild' ? aiChosenColor : card.color;
+      setUnoAiHand(remainingHand);
+      setUnoTopCard(card);
+      setUnoActiveColor(nextActiveColor);
+
+      const isSkipEffect = card.val === 'Skip' || card.val === 'Reverse' || card.val === '+2' || card.val === '+4';
+      setUnoMessage(`CyberGamer played ${nextActiveColor.toUpperCase()} ${card.val}.${isSkipEffect ? ' Your turn is skipped — CyberGamer goes again!' : ' Your turn!'}`);
+      if (isSkipEffect) {
+        // unoTurn is already 'AI' and won't change value, so this effect wouldn't
+        // re-fire on its own — bump a tick counter (in the dep array) to force it.
+        setUnoAiTurnTick(t => t + 1);
+      } else {
+        setUnoTurn('PLAYER');
+      }
+    }, 900);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGameId, unoTurn, unoRoundOver, unoAiTurnTick]);
 
   // Spin Wheel
   const handleSpinWheel = () => {
@@ -943,10 +1290,16 @@ export const GamingCenter: React.FC = () => {
                   <div className={`mt-1 px-5 py-3 rounded-2xl text-white font-black text-lg shadow-lg ${
                     unoTopCard.color === 'red' ? 'bg-red-600' :
                     unoTopCard.color === 'blue' ? 'bg-blue-600' :
-                    unoTopCard.color === 'green' ? 'bg-emerald-600' : 'bg-amber-500 text-slate-950'
+                    unoTopCard.color === 'green' ? 'bg-emerald-600' :
+                    unoTopCard.color === 'wild' ? 'bg-slate-700' : 'bg-amber-500 text-slate-950'
                   }`}>
                     {unoTopCard.val}
                   </div>
+                  <span className="text-[9px] text-slate-500 font-bold block mt-1">Active Color: {unoActiveColor.toUpperCase()}</span>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block uppercase font-bold">CyberGamer Hand</span>
+                  <span className="text-lg font-black text-pink-400">{unoAiHand.length} 🂠</span>
                 </div>
                 <div>
                   <span className="text-[10px] text-slate-400 block uppercase font-bold">Status</span>
@@ -954,61 +1307,55 @@ export const GamingCenter: React.FC = () => {
                 </div>
               </div>
 
+              {unoPendingWildIndex !== null && (
+                <div className="p-3 bg-slate-900 border border-amber-500/40 rounded-2xl flex items-center justify-center gap-2">
+                  <span className="text-xs font-bold text-slate-300 mr-1">Choose a color:</span>
+                  {['red', 'blue', 'green', 'yellow'].map(c => (
+                    <button
+                      key={c}
+                      onClick={() => handleUnoChooseColor(c)}
+                      className={`w-9 h-9 rounded-xl border-2 border-white/20 ${
+                        c === 'red' ? 'bg-red-600' : c === 'blue' ? 'bg-blue-600' : c === 'green' ? 'bg-emerald-600' : 'bg-amber-500'
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
+
               <div>
                 <span className="text-xs font-extrabold text-slate-300 block mb-2">Your Hand ({unoPlayerHand.length} Cards)</span>
                 <div className="flex flex-wrap items-center justify-center gap-2">
-                  {unoPlayerHand.map((card, i) => (
-                    <button
-                      key={i}
-                      onClick={() => {
-                        setUnoTopCard(card);
-                        const nextHand = unoPlayerHand.filter((_, idx) => idx !== i);
-                        setUnoPlayerHand(nextHand);
-                        if (nextHand.length === 0) {
-                          updateGamePoints(800, 'UNO Victory!', 'Uno Color Blitz');
-                          setUnoMessage('🎉 UNO VICTORY! Cleared all cards and won +800 Points!');
-                        } else {
-                          setUnoMessage(`Played ${card.color.toUpperCase()} ${card.val}!`);
-                        }
-                      }}
-                      className={`px-4 py-3 rounded-2xl font-black text-sm shadow-md transition-all transform hover:-translate-y-1 ${
-                        card.color === 'red' ? 'bg-red-600 text-white' :
-                        card.color === 'blue' ? 'bg-blue-600 text-white' :
-                        card.color === 'green' ? 'bg-emerald-600 text-white' : 'bg-amber-500 text-slate-950'
-                      }`}
-                    >
-                      {card.val}
-                    </button>
-                  ))}
+                  {unoPlayerHand.map((card, i) => {
+                    const playable = unoTurn === 'PLAYER' && !unoRoundOver && unoPendingWildIndex === null && isUnoCardPlayable(card, unoTopCard, unoActiveColor);
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => handlePlayUnoCard(i)}
+                        disabled={!playable}
+                        className={`px-4 py-3 rounded-2xl font-black text-sm shadow-md transition-all transform ${playable ? 'hover:-translate-y-1' : 'opacity-40 cursor-not-allowed'} ${
+                          card.color === 'red' ? 'bg-red-600 text-white' :
+                          card.color === 'blue' ? 'bg-blue-600 text-white' :
+                          card.color === 'green' ? 'bg-emerald-600 text-white' :
+                          card.color === 'wild' ? 'bg-gradient-to-br from-red-500 via-emerald-500 to-blue-500 text-white' : 'bg-amber-500 text-slate-950'
+                        }`}
+                      >
+                        {card.val}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
               <div className="flex items-center justify-center gap-3">
                 <button
-                  onClick={() => {
-                    const colors = ['red', 'blue', 'green', 'yellow'];
-                    const vals = ['1', '3', '7', '+2', 'Reverse', 'Wild'];
-                    const newCard = {
-                      color: colors[Math.floor(Math.random() * colors.length)],
-                      val: vals[Math.floor(Math.random() * vals.length)]
-                    };
-                    setUnoPlayerHand(prev => [...prev, newCard]);
-                    setUnoMessage(`Drew a card (${newCard.color.toUpperCase()} ${newCard.val})`);
-                  }}
-                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl"
+                  onClick={handleUnoDrawCard}
+                  disabled={unoTurn !== 'PLAYER' || unoRoundOver || unoPendingWildIndex !== null}
+                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-white font-bold text-xs rounded-xl"
                 >
                   Draw Card
                 </button>
                 <button
-                  onClick={() => {
-                    setUnoPlayerHand([
-                      { color: 'red', val: '7' },
-                      { color: 'blue', val: 'Wild' },
-                      { color: 'green', val: '4' },
-                      { color: 'yellow', val: '+2' }
-                    ]);
-                    setUnoMessage('Match color or number!');
-                  }}
+                  onClick={dealUnoRound}
                   className="px-5 py-2.5 bg-slate-950 border border-slate-800 text-slate-400 font-bold text-xs rounded-xl"
                 >
                   New Round
@@ -1052,7 +1399,7 @@ export const GamingCenter: React.FC = () => {
                         return;
                       }
 
-                      const aiChoice = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+                      const aiChoice = pickTicTacToeAiMove(nextGrid, 'O');
                       nextGrid[aiChoice] = 'O';
                       setTttGrid(nextGrid);
 
