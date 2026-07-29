@@ -45,7 +45,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const {
     wallet, dailyBonusClaimed, claimDailyBonus, vipTier, userLevel, notifications,
-    authUser, authError, loginWithGoogle, loginWithEmail, signUpWithEmail, logout
+    authUser, authError, loginWithGoogle, loginWithFacebook, loginWithEmail, signUpWithEmail, logout
   } = useEconomy();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -72,6 +72,11 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const handleGoogleClick = async () => {
     await loginWithGoogle();
+    setShowLoginModal(false);
+  };
+
+  const handleFacebookClick = async () => {
+    await loginWithFacebook();
     setShowLoginModal(false);
   };
 
@@ -329,6 +334,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
               </svg>
               Continue with Google
+            </button>
+
+            {/* FACEBOOK SIGN-IN */}
+            <button
+              onClick={handleFacebookClick}
+              className="w-full flex items-center justify-center gap-2 bg-[#1877F2] hover:bg-[#166FE5] text-white px-4 py-2.5 rounded-xl font-bold text-sm transition-all mb-4"
+            >
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M22 12.06C22 6.5 17.52 2 12 2S2 6.5 2 12.06c0 5.02 3.66 9.18 8.44 9.94v-7.03H7.9v-2.91h2.54V9.85c0-2.51 1.49-3.9 3.77-3.9 1.09 0 2.24.2 2.24.2v2.46h-1.26c-1.24 0-1.63.77-1.63 1.56v1.88h2.78l-.44 2.91h-2.34V22c4.78-.76 8.44-4.92 8.44-9.94z"/>
+              </svg>
+              Continue with Facebook
             </button>
 
             <div className="flex items-center gap-3 mb-4">
