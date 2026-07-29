@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { GameRoom } from '../types';
-import { MOCK_GAMES } from '../data/mockData';
 import { useEconomy } from '../context/EconomyContext';
 import { gamingLobbyService } from '../services/GamingLobbyService';
 import { apiFetch } from '../lib/apiConfig';
@@ -26,12 +25,12 @@ import {
 export const GamingCenter: React.FC = () => {
   const { wallet, updateGamePoints } = useEconomy();
   const [activeGameTab, setActiveGameTab] = useState<'LUDO' | 'LUCKY_WHEEL' | 'QUIZ' | 'UNO' | 'CHESS' | 'LOBBY'>('LUDO');
-  const [gameRooms, setGameRooms] = useState<GameRoom[]>(MOCK_GAMES);
+  const [gameRooms, setGameRooms] = useState<GameRoom[]>([]);
 
-  // Real-time Firestore subscription: replace placeholder lobby rooms with live data as soon as it arrives
+  // Real-time Firestore subscription
   useEffect(() => {
     const unsub = gamingLobbyService.subscribeToRooms((liveRooms) => {
-      if (liveRooms && liveRooms.length > 0) setGameRooms(liveRooms);
+      setGameRooms(liveRooms || []);
     });
     return () => unsub();
   }, []);
@@ -551,6 +550,11 @@ export const GamingCenter: React.FC = () => {
       {/* GAME 5: PUBLIC LOBBY ROOMS */}
       {activeGameTab === 'LOBBY' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {gameRooms.length === 0 && (
+            <div className="md:col-span-2 lg:col-span-3 text-center py-14 text-sm text-slate-500">
+              No public lobby rooms open right now.
+            </div>
+          )}
           {gameRooms.map(g => (
             <div key={g.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 hover:border-purple-500/50 transition-all">
               <div className="flex items-center justify-between">
