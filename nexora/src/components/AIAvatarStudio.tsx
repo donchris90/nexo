@@ -1,16 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Bot, Sparkles, Wand2, Volume2, Smile, Check } from 'lucide-react';
-import { MOCK_AVATARS } from '../data/mockData';
 import { avatarService } from '../services/AvatarService';
 import { apiFetch } from '../lib/apiConfig';
+import { AIAvatar } from '../types';
 
 export const AIAvatarStudio: React.FC = () => {
-  const [avatars, setAvatars] = useState(MOCK_AVATARS);
+  const [avatars, setAvatars] = useState<AIAvatar[]>([]);
 
-  // Real-time Firestore subscription: replace placeholder avatar catalog with live data as soon as it arrives
+  // Real-time Firestore subscription
   useEffect(() => {
     const unsub = avatarService.subscribeToAvatars((liveAvatars) => {
-      if (liveAvatars && liveAvatars.length > 0) setAvatars(liveAvatars);
+      setAvatars(liveAvatars || []);
     });
     return () => unsub();
   }, []);
@@ -18,10 +18,12 @@ export const AIAvatarStudio: React.FC = () => {
   const [keywords, setKeywords] = useState('neon armor, floating crown, fiery eyes');
   const [generatedResult, setGeneratedResult] = useState<{ prompt: string; suggestedName: string } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const handleGenerateAvatar = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setGenerateError(null);
 
     try {
       const res = await apiFetch('/api/ai/avatar', {
@@ -29,13 +31,13 @@ export const AIAvatarStudio: React.FC = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ style, keywords })
       });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const data = await res.json();
       setGeneratedResult(data);
     } catch (err) {
-      setGeneratedResult({
-        prompt: `A high quality 3D render avatar in ${style} style with ${keywords}`,
-        suggestedName: 'Aetheria Valkyrie 3000'
-      });
+      console.error('Avatar generation error:', err);
+      setGeneratedResult(null);
+      setGenerateError('Could not generate an avatar concept right now. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -98,6 +100,12 @@ export const AIAvatarStudio: React.FC = () => {
             {loading ? 'Generating AI Prompt...' : 'Generate AI Avatar Concept'}
           </button>
 
+          {generateError && (
+            <div className="p-3 bg-red-950/60 border border-red-500/30 rounded-2xl text-[11px] text-red-300 font-medium">
+              {generateError}
+            </div>
+          )}
+
           {generatedResult && (
             <div className="p-4 bg-slate-950 rounded-2xl border border-cyan-500/30 space-y-2">
               <span className="text-[10px] uppercase font-black text-cyan-400">Generated Concept</span>
@@ -109,6 +117,11 @@ export const AIAvatarStudio: React.FC = () => {
 
         {/* AVATAR GALLERY */}
         <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {avatars.length === 0 && (
+            <div className="sm:col-span-2 text-center py-10 text-sm text-slate-500">
+              No saved avatars yet — generate one to get started.
+            </div>
+          )}
           {avatars.map(av => (
             <div key={av.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3">
               <img
