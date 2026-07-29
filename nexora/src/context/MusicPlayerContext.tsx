@@ -88,7 +88,7 @@ export const MusicPlayerProvider: React.FC<{ children: React.ReactNode }> = ({ c
     // Subscribe to Firestore music track collection for real-time updates
     const unsubscribe = musicService.subscribeToTracks((updatedTracks) => {
       setTracks(updatedTracks);
-    });
+    }, user?.uid);
 
     return () => {
       unsubscribe();
