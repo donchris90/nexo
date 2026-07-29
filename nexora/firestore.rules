@@ -204,5 +204,49 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if isSignedIn();
     }
+
+    // Per-stream live sync state (video_sync, music_sync docs)
+    match /streams/{streamId}/live_data/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
+    // Video Library & related collections
+    match /video_library/{videoId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+    match /video_playlists/{playlistId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+    match /recent_videos/{docId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+    match /favorite_videos/{docId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+    match /video_reports/{reportId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
+
+    // Music Library & related collections
+    match /music_tracks/{trackId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+    match /playlists/{playlistId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+    match /recently_played/{docId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+    match /favorites/{docId} {
+      allow read, create, update, delete: if isSignedIn();
+    }
+    match /music_reports/{reportId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
   }
 }
