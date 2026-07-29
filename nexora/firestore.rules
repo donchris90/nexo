@@ -80,6 +80,14 @@ service cloud.firestore {
       allow create, update, delete: if isSignedIn();
     }
 
+    // Game Engine Match Sessions (Ludo/UNO/Tic-Tac-Toe/etc. — GameEngine.ts).
+    // Previously unlisted, so the global deny-all default silently rejected every
+    // createMatch/joinMatch/submitMove/subscribeToSession call in production.
+    match /game_sessions/{sessionId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn();
+    }
+
     // Marketplace: Shopping Products
     match /shopping_products/{productId} {
       allow read: if true;
