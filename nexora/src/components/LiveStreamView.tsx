@@ -57,6 +57,9 @@ import { useMusicPlayer } from '../context/MusicPlayerContext';
 import { useVideoPlayer } from '../context/VideoPlayerContext';
 import { videoStorageService } from '../services/VideoStorageService';
 import { videoService } from '../services/VideoService';
+import { agoraEngine } from '../lib/agora';
+import { musicStorageService } from '../services/MusicStorageService';
+import { musicService } from '../services/MusicService';
 
 interface LiveStreamViewProps {
   mode?: 'LIVE' | 'PARTY';
@@ -86,7 +89,8 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
     setMusicVolume,
     setMicrophoneVolume,
     attachStreamSync,
-    detachStreamSync
+    detachStreamSync,
+    refreshTracks
   } = useMusicPlayer();
 
   const {
@@ -158,6 +162,96 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
   const [uploadVisibility, setUploadVisibility] = useState<'PUBLIC' | 'PRIVATE' | 'DRAFT'>('PUBLIC');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
+  // Live Music Upload Modal State
+  const [showMusicUploadModal, setShowMusicUploadModal] = useState(false);
+  const [musicUploadFile, setMusicUploadFile] = useState<File | null>(null);
+  const [musicUploadTitle, setMusicUploadTitle] = useState('');
+  const [musicUploadArtist, setMusicUploadArtist] = useState('');
+  const [musicUploadError, setMusicUploadError] = useState<string | null>(null);
+  const [musicUploadProgress, setMusicUploadProgress] = useState<number | null>(null);
+
+  const handleMusicFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const validation = musicStorageService.validateAudioFile(file);
+    if (!validation.valid) {
+      setMusicUploadError(validation.error || 'Invalid audio file.');
+      setMusicUploadFile(null);
+      return;
+    }
+    setMusicUploadError(null);
+    setMusicUploadFile(file);
+    if (!musicUploadTitle) setMusicUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
+  };
+
+  const handleMusicUploadSubmit = async () => {
+    if (!musicUploadFile) {
+      setMusicUploadError('Please select an MP3, WAV, AAC, or M4A file (max 25MB).');
+      return;
+    }
+    if (!musicUploadTitle.trim() || !musicUploadArtist.trim()) {
+      setMusicUploadError('Track title and artist name are required.');
+      return;
+    }
+
+    setMusicUploadError(null);
+    setMusicUploadProgress(0);
+    try {
+      const audioResult = await musicStorageService.uploadAudioFile(
+        musicUploadFile,
+        musicUploadArtist.trim(),
+        'single',
+        (progress) => setMusicUploadProgress(Math.floor(progress * 0.9))
+      );
+
+      const newTrackId = await musicService.createTrack({
+        title: musicUploadTitle.trim(),
+        artist: musicUploadArtist.trim(),
+        genre: 'Live Upload',
+        duration: 180,
+        coverImage: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=600&q=80',
+        audioUrl: audioResult.audioUrl,
+        uploadedBy: user?.uid || 'guest_creator',
+        uploadedByName: myDisplayName,
+        isPublic: true,
+        status: 'APPROVED',
+        fileSizeBytes: audioResult.fileSizeBytes
+      });
+
+      setMusicUploadProgress(100);
+      await refreshTracks();
+
+      // Immediately queue it up so the host can play it right away in this stream
+      playTrack({
+        id: newTrackId,
+        title: musicUploadTitle.trim(),
+        artist: musicUploadArtist.trim(),
+        genre: 'Live Upload',
+        duration: 180,
+        coverImage: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=600&q=80',
+        audioUrl: audioResult.audioUrl,
+        uploadedBy: user?.uid || 'guest_creator',
+        uploadedByName: myDisplayName,
+        createdAt: new Date().toISOString(),
+        playCount: 0,
+        likes: 0,
+        isPublic: true,
+        status: 'APPROVED'
+      });
+
+      setTimeout(() => {
+        setShowMusicUploadModal(false);
+        setMusicUploadFile(null);
+        setMusicUploadTitle('');
+        setMusicUploadArtist('');
+        setMusicUploadProgress(null);
+      }, 800);
+    } catch (err: any) {
+      setMusicUploadError(err.message || 'Music upload failed. Please try again.');
+      setMusicUploadProgress(null);
+    }
+  };
+
   // Attach real-time Firestore stream audio & video synchronization
   useEffect(() => {
     if (selectedStream?.id) {
@@ -215,7 +309,11 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
 
   // Webcam State
   const [webcamEnabled, setWebcamEnabled] = useState(false);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [agoraJoining, setAgoraJoining] = useState(false);
+  // Container (not a <video> tag) — Agora's SDK injects its own <video> element into this element
+  const videoRef = useRef<HTMLDivElement | null>(null);
+  // Whether the remote host's video track is currently playing (viewer side)
+  const [remoteVideoActive, setRemoteVideoActive] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll chat
@@ -228,27 +326,63 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
     setChatMessages([]);
   }, [selectedStream?.id]);
 
-  // Toggle Webcam
+  // Toggle Webcam — joins/leaves the Agora channel as host and publishes real mic+camera tracks
   const toggleWebcam = async () => {
+    if (!selectedStream?.id) return;
+
     if (webcamEnabled) {
-      if (videoRef.current && videoRef.current.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
-        videoRef.current.srcObject = null;
-      }
+      await agoraEngine.leaveChannel();
       setWebcamEnabled(false);
-    } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-        setWebcamEnabled(true);
-      } catch (err) {
-        alert('Camera permission denied or camera not available.');
+      return;
+    }
+
+    setAgoraJoining(true);
+    try {
+      await agoraEngine.joinChannel(selectedStream.id, 'host', user?.uid);
+      const localVideoTrack = agoraEngine.getLocalVideoTrack();
+      if (localVideoTrack && videoRef.current) {
+        localVideoTrack.play(videoRef.current);
       }
+      setWebcamEnabled(true);
+    } catch (err) {
+      console.warn('Failed to go live via Agora:', err);
+      alert('Camera/mic permission denied, or unable to reach the live server. Check permissions and try again.');
+    } finally {
+      setAgoraJoining(false);
     }
   };
+
+  // Viewers: auto-join the Agora channel as audience and subscribe to the host's stream
+  useEffect(() => {
+    if (!selectedStream?.id) return;
+    const viewerIsHost = !!user && selectedStream.creatorId === user.uid;
+    if (viewerIsHost) return;
+
+    let unsubscribeRemote: (() => void) | null = null;
+    let cancelled = false;
+
+    (async () => {
+      await agoraEngine.joinChannel(selectedStream.id, 'audience', user?.uid);
+      if (cancelled) return;
+      if (videoRef.current) {
+        unsubscribeRemote = agoraEngine.onRemoteVideo(videoRef.current, setRemoteVideoActive);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      unsubscribeRemote?.();
+      setRemoteVideoActive(false);
+      agoraEngine.leaveChannel();
+    };
+  }, [selectedStream?.id, selectedStream?.creatorId, user?.uid]);
+
+  // Host: leave the channel on unmount / stream switch so the mic/camera don't stay live
+  useEffect(() => {
+    return () => {
+      if (webcamEnabled) agoraEngine.leaveChannel();
+    };
+  }, [selectedStream?.id]);
 
   // Take a Seat in Party Room
   const handleTakeSeat = (seatNum: number) => {
@@ -597,12 +731,9 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
                   {/* Host Camera PIP Overlay in bottom right */}
                   {webcamEnabled && (
                     <div className="absolute bottom-4 right-4 w-36 h-28 rounded-2xl overflow-hidden border-2 border-cyan-400/80 shadow-2xl z-10 bg-slate-900">
-                      <video
+                      <div
                         ref={videoRef}
-                        autoPlay
-                        playsInline
-                        muted
-                        className="w-full h-full object-cover transform scale-x-[-1]"
+                        className="w-full h-full object-cover [&_video]:w-full [&_video]:h-full [&_video]:object-cover"
                       />
                       <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-slate-950/80 text-[8px] font-black text-cyan-300 rounded-md">
                         HOST CAM
@@ -610,13 +741,10 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
                     </div>
                   )}
                 </div>
-              ) : webcamEnabled ? (
-                <video
+              ) : (isHost && webcamEnabled) || (!isHost && remoteVideoActive) ? (
+                <div
                   ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover transform scale-x-[-1]"
+                  className="w-full h-full object-cover [&_video]:w-full [&_video]:h-full [&_video]:object-cover"
                 />
               ) : (
                 <img
@@ -658,13 +786,16 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
                 <span className="px-3 py-1 bg-slate-900/90 backdrop-blur-md text-slate-200 text-xs font-bold rounded-full border border-slate-700/80 flex items-center gap-1">
                   👁️ {selectedStream.viewersCount.toLocaleString()}
                 </span>
-                <button
-                  onClick={toggleWebcam}
-                  className="px-3 py-1 bg-slate-900/90 hover:bg-slate-800 text-slate-200 text-xs font-bold rounded-full border border-slate-700 flex items-center gap-1 transition-all"
-                >
-                  <Camera className="w-3.5 h-3.5 text-amber-400" />
-                  {webcamEnabled ? 'Stop Cam' : 'Live Cam'}
-                </button>
+                {isHost && (
+                  <button
+                    onClick={toggleWebcam}
+                    disabled={agoraJoining}
+                    className="px-3 py-1 bg-slate-900/90 hover:bg-slate-800 text-slate-200 text-xs font-bold rounded-full border border-slate-700 flex items-center gap-1 transition-all disabled:opacity-50"
+                  >
+                    <Camera className="w-3.5 h-3.5 text-amber-400" />
+                    {agoraJoining ? 'Connecting...' : webcamEnabled ? 'Stop Cam' : 'Live Cam'}
+                  </button>
+                )}
                 <button
                   onClick={() => setShowEffectsDrawer(true)}
                   className="px-3 py-1 bg-purple-900/90 hover:bg-purple-800 text-pink-300 text-xs font-black rounded-full border border-purple-500/50 flex items-center gap-1 shadow"
@@ -811,6 +942,16 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
                 >
                   <SkipForward className="w-4 h-4" />
                 </button>
+
+                {isHost && (
+                  <button
+                    onClick={() => setShowMusicUploadModal(true)}
+                    className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold text-xs rounded-xl border border-slate-700 flex items-center gap-1"
+                    title="Upload a track to play in this stream"
+                  >
+                    <Upload className="w-3.5 h-3.5" /> Upload
+                  </button>
+                )}
 
                 <div className="hidden sm:flex items-center gap-2 border-l border-slate-800 pl-3">
                   <span className="text-[10px] text-slate-400 font-bold">Music Vol:</span>
@@ -1831,6 +1972,83 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
               isHostOrMod={isHost}
               onClose={() => setShowModerationPanel(false)}
             />
+          </div>
+        </div>
+      )}
+
+      {/* LIVE MUSIC UPLOAD MODAL */}
+      {showMusicUploadModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto animate-fadeIn">
+          <div className="w-full max-w-md bg-slate-900 border border-purple-500/40 rounded-3xl p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="font-black text-sm text-slate-100 flex items-center gap-2">
+                <Upload className="w-4 h-4 text-amber-400" /> Upload Track to Play Live
+              </h3>
+              <button
+                onClick={() => { setShowMusicUploadModal(false); setMusicUploadError(null); }}
+                className="text-slate-500 hover:text-slate-200 text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <label className="block border-2 border-dashed border-slate-700 hover:border-amber-400/60 rounded-2xl p-4 text-center cursor-pointer transition-all">
+              <input type="file" accept="audio/*,.mp3,.wav,.m4a" className="hidden" onChange={handleMusicFileChange} />
+              <Disc className="w-6 h-6 text-purple-400 mx-auto mb-1" />
+              <span className="text-xs font-bold text-slate-300">
+                {musicUploadFile ? musicUploadFile.name : 'Tap to choose an MP3, WAV, AAC, or M4A file'}
+              </span>
+              <p className="text-[10px] text-slate-500 mt-1">Max 25 MB</p>
+            </label>
+
+            <div>
+              <label className="text-xs font-bold text-slate-300 block mb-1">Track Title</label>
+              <input
+                type="text"
+                value={musicUploadTitle}
+                onChange={(e) => setMusicUploadTitle(e.target.value)}
+                placeholder="e.g. Midnight Groove"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-300 block mb-1">Artist</label>
+              <input
+                type="text"
+                value={musicUploadArtist}
+                onChange={(e) => setMusicUploadArtist(e.target.value)}
+                placeholder="e.g. Your artist name"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            {musicUploadError && (
+              <p className="text-[11px] text-rose-400 font-bold">{musicUploadError}</p>
+            )}
+
+            {musicUploadProgress !== null && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-xs font-bold text-amber-300">
+                  <span>Uploading...</span>
+                  <span>{musicUploadProgress}%</span>
+                </div>
+                <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                  <div
+                    className="h-full bg-gradient-to-r from-amber-500 to-orange-400 transition-all duration-300"
+                    style={{ width: `${musicUploadProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            <button
+              disabled={!musicUploadFile || musicUploadProgress !== null}
+              onClick={handleMusicUploadSubmit}
+              className="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl shadow-lg disabled:opacity-50 hover:from-amber-400 hover:to-orange-400 transition-all"
+            >
+              {musicUploadProgress !== null ? 'Uploading...' : 'Upload & Play Now'}
+            </button>
           </div>
         </div>
       )}
