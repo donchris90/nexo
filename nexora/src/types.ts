@@ -316,6 +316,7 @@ export interface GiftItem {
 
 export interface PartySeat {
   seatNumber: number;
+  uid?: string;
   userName?: string;
   userAvatar?: string;
   userLevel?: number;
