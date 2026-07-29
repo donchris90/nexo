@@ -378,7 +378,23 @@ async function startServer() {
       const currentTimestamp = Math.floor(Date.now() / 1000);
       const privilegeExpiredTs = currentTimestamp + expireSeconds;
 
-      const appId = process.env.AGORA_APP_ID || process.env.VITE_AGORA_APP_ID || 'a0000000000000000000000000000000';
+      const envAppId = process.env.AGORA_APP_ID || process.env.VITE_AGORA_APP_ID || '';
+      const isValid = envAppId && envAppId.trim().length === 32 && envAppId !== 'a0000000000000000000000000000000' && !envAppId.startsWith('unconfigured') && !envAppId.startsWith('AIza');
+      
+      if (!isValid) {
+        return res.json({
+          token: null,
+          appId: '',
+          channelName,
+          uid: numericUid,
+          role: roleParam,
+          configured: false,
+          status: 'UNCONFIGURED',
+          message: 'AGORA_APP_ID environment variable is not configured. Client operating in local simulation mode.'
+        });
+      }
+
+      const appId = envAppId.trim();
       const appCertificate = process.env.AGORA_APP_CERTIFICATE || '';
 
       let token = '';
@@ -412,6 +428,7 @@ async function startServer() {
         role: roleParam,
         expiresIn: expireSeconds,
         privilegeExpiredTs,
+        configured: true,
         status: 'SUCCESS'
       });
     } catch (error: any) {
