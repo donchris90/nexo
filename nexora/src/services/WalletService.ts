@@ -82,14 +82,14 @@ export class WalletService {
    */
   public async calculateBalanceFromLedger(userId: string): Promise<WalletState> {
     const defaultWallet: WalletState = {
-      coins: 12500,
-      points: 8400,
-      diamonds: 3200,
+      coins: 0,
+      points: 0,
+      diamonds: 0,
       lockedCoins: 0,
       lockedPoints: 0,
       pendingEarnings: 0,
-      withdrawalBalance: 160.0,
-      bonusBalance: 500,
+      withdrawalBalance: 0,
+      bonusBalance: 0,
       totalSpentCoins: 0,
       agencyCommissionCoins: 0
     };
@@ -243,7 +243,7 @@ export class WalletService {
   /**
    * Helper: Request withdrawal (Debits diamonds from creator)
    */
-  public async requestWithdrawal(userId: string, diamondAmount: number, payoutMethod: string): Promise<LedgerEntry> {
+  public async requestWithdrawal(userId: string, diamondAmount: number, payoutMethod: string, accountDetails?: string): Promise<LedgerEntry> {
     return this.appendLedgerEntry({
       userId,
       type: 'WITHDRAWAL',
@@ -251,8 +251,62 @@ export class WalletService {
       amount: -diamondAmount,
       description: `Withdrawal request of $${(diamondAmount * 0.05).toFixed(2)} USD (${diamondAmount} Diamonds) to ${payoutMethod}`,
       status: 'PENDING',
+      relatedUser: accountDetails,
+      metadata: { method: payoutMethod, accountDetails: accountDetails || '' },
       timestamp: new Date().toISOString()
     });
+  }
+
+  /**
+   * Retrieve withdrawal history for a user, reconstructed from WITHDRAWAL-type ledger entries
+   */
+  public async getWithdrawalHistory(userId: string): Promise<Array<{
+    id: string;
+    amountDiamonds: number;
+    amountUsd: number;
+    method: 'PAYPAL' | 'BANK_WIRE' | 'STRIPE' | 'CRYPTO';
+    accountDetails: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'PROCESSED';
+    requestDate: string;
+  }>> {
+    try {
+      const q = query(
+        collection(db, this.collectionName),
+        where('userId', '==', userId),
+        where('type', '==', 'WITHDRAWAL')
+      );
+
+      const snapshot = await getDocs(q);
+      const records: Array<{
+        id: string;
+        amountDiamonds: number;
+        amountUsd: number;
+        method: 'PAYPAL' | 'BANK_WIRE' | 'STRIPE' | 'CRYPTO';
+        accountDetails: string;
+        status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'PROCESSED';
+        requestDate: string;
+      }> = [];
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as LedgerEntry;
+        const rawMethod = data.metadata?.method;
+        const validMethods = ['PAYPAL', 'BANK_WIRE', 'STRIPE', 'CRYPTO'];
+        records.push({
+          id: docSnap.id,
+          amountDiamonds: Math.abs(data.amount),
+          amountUsd: Math.abs(data.amount) * 0.05,
+          method: validMethods.includes(rawMethod) ? rawMethod : 'BANK_WIRE',
+          accountDetails: data.metadata?.accountDetails || '',
+          status: data.status === 'COMPLETED' ? 'PROCESSED' : (data.status === 'FAILED' ? 'REJECTED' : 'PENDING'),
+          requestDate: (data.timestamp || new Date().toISOString()).split('T')[0]
+        });
+      });
+
+      return records.sort((a, b) => new Date(b.requestDate).getTime() - new Date(a.requestDate).getTime());
+    } catch (err) {
+      console.warn('WalletService.getWithdrawalHistory error:', err);
+      return [];
+    }
   }
 
   /**
