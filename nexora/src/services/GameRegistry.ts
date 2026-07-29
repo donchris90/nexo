@@ -35,7 +35,7 @@ export function getBuiltInGameModules(): IGameModule[] {
           turnIndex: 0
         };
       },
-      onTurnMove: (state, userId, move, players) => {
+      onTurnMove: (state, userId, move) => {
         const userTokens = state.tokens?.[userId] || [-1, -1, -1, -1];
         const safeCells = [0, 8, 13, 21, 26, 34, 39, 47];
 

@@ -271,6 +271,32 @@ class ModerationService {
   }
 
   /**
+   * Marks a guest as an ACTIVE co-host once they have actually joined and are
+   * publishing (called by the guest's own client after a successful Agora join), and
+   * removes their now-consumed mic request so it doesn't get re-processed.
+   */
+  public async activateCoHost(
+    streamId: string,
+    currentCoHosts: any[],
+    currentMicRequests: any[],
+    userId: string,
+    userName: string,
+    userAvatar: string,
+    seatNumber: number
+  ) {
+    const updatedCoHosts = [...currentCoHosts.filter(c => c.userId !== userId), {
+      userId,
+      userName,
+      userAvatar,
+      type: 'VIDEO' as const,
+      seatNumber,
+      status: 'ACTIVE' as const
+    }];
+    const updatedMicRequests = currentMicRequests.filter(r => r.userId !== userId);
+    await this.updateModerationState(streamId, { coHosts: updatedCoHosts, micRequests: updatedMicRequests }, userId, `ACTIVATE_COHOST:${userName}`);
+  }
+
+  /**
    * Automated Message Moderation (Spam, Profanity, URL, Emoji)
    */
   public filterChatMessage(text: string, userId: string, customBlockedWords: string[] = []): { allowed: boolean; filteredText: string; reason?: string } {
