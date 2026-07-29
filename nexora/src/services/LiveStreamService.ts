@@ -13,13 +13,14 @@ import {
   FirestoreError
 } from 'firebase/firestore';
 import { LiveStream, GiftItem } from '../types';
+import { MOCK_STREAMS } from '../data/mockData';
 
 class LiveStreamService {
   private streamsCollection = 'streams';
   private giftsCollection = 'gift_catalog';
 
   /**
-   * Subscribe to real-time list of live streams
+   * Subscribe to real-time list of live streams (only active live streams)
    */
   public subscribeToStreams(callback: (streams: LiveStream[]) => void, streamLimit = 50) {
     const q = query(collection(db, this.streamsCollection), limit(streamLimit));
@@ -28,11 +29,21 @@ class LiveStreamService {
       (snapshot: QuerySnapshot<DocumentData>) => {
         const streams: LiveStream[] = [];
         snapshot.forEach((docSnap) => {
-          streams.push({ id: docSnap.id, ...docSnap.data() } as LiveStream);
+          const data = docSnap.data() as LiveStream;
+          if (data.isLive !== false) {
+            streams.push({ id: docSnap.id, ...data });
+          }
         });
-        callback(streams);
+        if (streams.length > 0) {
+          callback(streams);
+        } else {
+          callback(MOCK_STREAMS.filter(s => s.isLive !== false));
+        }
       },
-      (err: FirestoreError) => console.warn('Streams subscription warning:', err)
+      (err: FirestoreError) => {
+        console.warn('Streams subscription warning:', err);
+        callback(MOCK_STREAMS.filter(s => s.isLive !== false));
+      }
     );
   }
 

@@ -3,4 +3,8 @@ export { authService, AuthService, useAuth, AuthProvider } from './AuthService';
 export { pkBattleService, PkBattleService, PKBattleService } from './PkBattleService';
 export { chatService, ChatService } from './ChatService';
 export { gameService, GameService } from './GameService';
+export { gameEngine, GameEngine } from './GameEngine';
+export { initializeGameRegistry } from './GameRegistry';
+export { tournamentService, TournamentService } from './TournamentService';
+export { dailyMissionsService, DailyMissionsService } from './DailyMissionsService';
 export { agoraService, AgoraService } from './AgoraService';

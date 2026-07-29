@@ -159,9 +159,9 @@ export class MusicService {
   }
 
   /**
-   * Realtime subscription to approved public tracks
+   * Realtime subscription to approved public tracks and user's private tracks
    */
-  public subscribeToTracks(callback: (tracks: MusicTrack[]) => void) {
+  public subscribeToTracks(callback: (tracks: MusicTrack[]) => void, userId?: string) {
     try {
       const q = query(
         collection(db, this.tracksCollection),
@@ -173,7 +173,13 @@ export class MusicService {
           callback(SEEDED_MUSIC_TRACKS);
         } else {
           const tracks = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MusicTrack));
-          callback(tracks);
+          const filtered = tracks.filter(t => {
+            if (t.isPublic === false || t.isPrivate === true) {
+              return userId ? t.uploadedBy === userId : false;
+            }
+            return true;
+          });
+          callback(filtered);
         }
       }, (err: FirestoreError) => {
         console.warn('[MusicService] Track subscription warning:', err);
