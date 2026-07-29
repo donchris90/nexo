@@ -34,6 +34,8 @@ import {
   MOCK_DIGITAL_PRODUCTS,
   MOCK_SERVICES
 } from '../src/data/mockData';
+import { SEEDED_VIDEOS } from '../src/services/VideoService';
+import { SEEDED_MUSIC_TRACKS } from '../src/services/MusicService';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -83,6 +85,8 @@ async function main() {
   await seedCollection('shopping_products', MOCK_SHOPPING_PRODUCTS as unknown as SeedItem[]);
   await seedCollection('digital_products', MOCK_DIGITAL_PRODUCTS as unknown as SeedItem[]);
   await seedCollection('creator_services', MOCK_SERVICES as unknown as SeedItem[]);
+  await seedCollection('video_library', SEEDED_VIDEOS as unknown as SeedItem[]);
+  await seedCollection('music_tracks', SEEDED_MUSIC_TRACKS as unknown as SeedItem[]);
 
   console.log('\nDone. Refresh the live app — it should now show live Firestore data instead of mock data.');
   process.exit(0);
