@@ -345,7 +345,7 @@ export interface LiveStream {
   creatorLevel?: number;
   location?: string;
   title: string;
-  category: 'PARTY_ROOM' | 'PK_BATTLE' | 'GAMING' | 'TALK_SHOW' | 'MUSIC' | 'SHOPPING' | 'PODCAST';
+  category: 'PARTY_ROOM' | 'PK_BATTLE' | 'GAMING' | 'TALK_SHOW' | 'MUSIC' | 'SHOPPING' | 'PODCAST' | 'MULTI_GUEST';
   viewersCount: number;
   likesCount: number;
   thumbnailUrl: string;
@@ -382,7 +382,7 @@ export interface ChatMessage {
 
 export interface GameRoom {
   id: string;
-  gameId: 'LUDO' | 'DOMINOES' | 'UNO' | 'CHESS' | 'LUCKY_WHEEL' | 'QUIZ_BATTLE' | 'TIC_TAC_TOE' | 'DICE' | 'SNAKE';
+  gameId: string;
   gameName: string;
   hostName: string;
   minWagerPoints: number;
@@ -391,6 +391,64 @@ export interface GameRoom {
   isPrivate: boolean;
   roomCode?: string;
   status: 'WAITING' | 'IN_PROGRESS' | 'COMPLETED';
+  category?: 'CASUAL' | 'PARTY' | 'COIN' | 'HOST' | 'PK' | 'FAMILY';
+}
+
+export type GameCategory = 'CASUAL' | 'PARTY' | 'COIN' | 'HOST' | 'PK' | 'FAMILY';
+
+export interface GameDefinition {
+  id: string;
+  name: string;
+  category: GameCategory;
+  description: string;
+  iconName: string;
+  minPlayers: number;
+  maxPlayers: number;
+  wagerAllowed: boolean;
+  isPopular?: boolean;
+  isNew?: boolean;
+  supportedModes: ('SOLO' | 'MULTIPLAYER' | 'LIVE_ROOM' | 'PARTY_ROOM' | 'PK_MATCH')[];
+  howToPlay: string;
+}
+
+export interface Tournament {
+  id: string;
+  title: string;
+  gameId: string;
+  category: GameCategory;
+  prizePoolCoins: number;
+  prizePoolPoints: number;
+  entryFeePoints: number;
+  startTime: string;
+  registeredCount: number;
+  maxParticipants: number;
+  status: 'UPCOMING' | 'LIVE' | 'COMPLETED';
+  bannerImage: string;
+  rules: string[];
+}
+
+export interface DailyGameMission {
+  id: string;
+  title: string;
+  description: string;
+  targetCount: number;
+  currentCount: number;
+  rewardType: 'COINS' | 'POINTS' | 'EXP';
+  rewardAmount: number;
+  isClaimed: boolean;
+  icon: string;
+}
+
+export interface GameInvite {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderAvatar: string;
+  gameId: string;
+  gameName: string;
+  wagerPoints: number;
+  createdAt: string;
+  status: 'PENDING' | 'ACCEPTED' | 'DECLINED';
 }
 
 export interface ShoppingProduct {

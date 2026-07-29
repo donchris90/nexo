@@ -45,12 +45,12 @@ function MainAppContent() {
   const [focusStreamId, setFocusStreamId] = useState<string | undefined>(undefined);
   const [goLiveError, setGoLiveError] = useState<string | null>(null);
 
-  // Sub-tab states for BIGO style top navigation
+  // Sub-tab states for top navigation
   const [liveSubTab, setLiveSubTab] = useState<'NEARBY' | 'POPULAR' | 'FEATURED' | 'EXPLORE'>('POPULAR');
   const [partyCategory, setPartyCategory] = useState<string>('9SEAT');
 
   const handleSelectStreamType = async (
-    type: 'VIDEO' | 'PARTY_9SEAT' | 'PK_BATTLE' | 'REEL',
+    type: 'VIDEO' | 'MULTI_GUEST' | 'PODCAST' | 'PARTY_9SEAT' | 'PK_BATTLE' | 'GAMING' | 'REEL',
     details: { title: string; tag: string }
   ) => {
     if (type === 'REEL') {
@@ -63,6 +63,18 @@ function MainAppContent() {
     const creatorAvatar = user?.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${creatorId}`;
     const title = details.title.trim() || 'Untitled Stream';
 
+    const categoryMap: Record<string, LiveStream['category']> = {
+      PARTY_9SEAT: 'PARTY_ROOM',
+      PK_BATTLE: 'PK_BATTLE',
+      PODCAST: 'PODCAST',
+      MULTI_GUEST: 'MULTI_GUEST',
+      GAMING: 'GAMING',
+      VIDEO: 'TALK_SHOW'
+    };
+
+    const isPartyOrMulti = type === 'PARTY_9SEAT' || type === 'MULTI_GUEST' || type === 'PODCAST';
+    const seatCount = type === 'PARTY_9SEAT' ? 9 : type === 'MULTI_GUEST' ? 6 : 4;
+
     const newStream: Omit<LiveStream, 'id'> = {
       creatorId,
       creatorName,
@@ -70,18 +82,18 @@ function MainAppContent() {
       creatorVerified: false,
       creatorLevel: userLevel.currentLevel,
       title,
-      category: type === 'PARTY_9SEAT' ? 'PARTY_ROOM' : type === 'PK_BATTLE' ? 'PK_BATTLE' : 'TALK_SHOW',
-      viewersCount: 0,
+      category: categoryMap[type] || 'TALK_SHOW',
+      viewersCount: 1,
       likesCount: 0,
       thumbnailUrl: creatorAvatar,
-      tags: details.tag ? [details.tag] : [],
+      tags: details.tag ? [details.tag, type] : [type],
       isLive: true,
       aiCohostEnabled: false,
-      ...(type === 'PARTY_9SEAT'
+      ...(isPartyOrMulti
         ? {
             isPartyRoom: true,
-            seatGridSize: 9 as const,
-            seats: Array.from({ length: 9 }, (_, i) => ({
+            seatGridSize: seatCount as any,
+            seats: Array.from({ length: seatCount }, (_, i) => ({
               seatNumber: i + 1,
               ...(i === 0
                 ? {
@@ -96,6 +108,20 @@ function MainAppContent() {
                 : {})
             }))
           }
+        : {}),
+      ...(type === 'PK_BATTLE'
+        ? {
+            pkBattle: {
+              isPkActive: true,
+              opponentName: 'Host Rival 🔥',
+              opponentAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80',
+              opponentLevel: 25,
+              selfScore: 1200,
+              opponentScore: 980,
+              timeRemainingSeconds: 180,
+              winningTeam: 'RED' as const
+            }
+          }
         : {})
     };
 
@@ -103,7 +129,7 @@ function MainAppContent() {
       setGoLiveError(null);
       const newId = await liveStreamService.createStream(newStream);
       setFocusStreamId(newId);
-      setActiveTab(type === 'PARTY_9SEAT' ? 'party' : 'live');
+      setActiveTab(type === 'PARTY_9SEAT' || type === 'MULTI_GUEST' || type === 'PODCAST' ? 'party' : 'live');
     } catch (err) {
       console.error('Failed to start stream:', err);
       setGoLiveError('Could not start the stream. Please try again.');
@@ -198,7 +224,7 @@ function MainAppContent() {
         </ErrorBoundary>
       </main>
 
-      {/* BIGO STYLE BOTTOM FIXED NAVIGATION MENU */}
+      {/* BOTTOM FIXED NAVIGATION MENU */}
       <BottomNav
         activeTab={activeTab}
         setActiveTab={setActiveTab}
