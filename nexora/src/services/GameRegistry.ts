@@ -1,4 +1,4 @@
-import { IGameModule } from './GameEngine';
+import { IGameModule, getNextPlayerId } from './GameEngine';
 
 /**
  * Returns all built-in Nexora game modules
@@ -32,29 +32,44 @@ export function getBuiltInGameModules(): IGameModule[] {
           tokens, // userId -> [token0, token1, token2, token3]
           lastRoll: null,
           hasRolled: false,
-          turnIndex: 0
+          consecutiveSixes: 0
         };
       },
-      onTurnMove: (state, userId, move) => {
+      onTurnMove: (state, userId, move, players) => {
         const userTokens = state.tokens?.[userId] || [-1, -1, -1, -1];
         const safeCells = [0, 8, 13, 21, 26, 34, 39, 47];
 
         if (move.action === 'ROLL_DICE') {
           const dice = Math.floor(Math.random() * 6) + 1;
-          const canMoveAny = userTokens.some(t => (t === -1 && dice === 6) || (t >= 0 && t + dice <= 106));
+          const canMoveAny = userTokens.some((t: number) => (t === -1 && dice === 6) || (t >= 0 && t + dice <= 106));
+
+          // Three consecutive 6s forfeits the turn (official rule) — also guards
+          // against a player rolling 6 forever and never actually playing.
+          const consecutiveSixes = dice === 6 ? (state.consecutiveSixes || 0) + 1 : 0;
+          const forfeitTurn = consecutiveSixes >= 3;
+
+          if (!canMoveAny || forfeitTurn) {
+            // No legal move (or forfeited): turn passes immediately instead of
+            // stranding the game waiting for a MOVE_TOKEN that can never come.
+            return {
+              nextState: { ...state, lastRoll: null, hasRolled: false, consecutiveSixes: 0 },
+              nextTurnUserId: getNextPlayerId(players, userId),
+              logMessage: forfeitTurn ? `Rolled three 6s in a row — turn forfeited!` : `Rolled a ${dice}. No legal moves available — turn passes.`
+            };
+          }
 
           return {
-            nextState: {
-              ...state,
-              lastRoll: dice,
-              hasRolled: true
-            },
-            nextTurnUserId: canMoveAny ? userId : undefined,
-            logMessage: `Rolled a ${dice}! ${canMoveAny ? 'Select a token to move.' : 'No legal moves available.'}`
+            nextState: { ...state, lastRoll: dice, hasRolled: true, consecutiveSixes },
+            nextTurnUserId: userId,
+            logMessage: `Rolled a ${dice}! Select a token to move.`
           };
         }
 
         if (move.action === 'MOVE_TOKEN') {
+          if (!state.hasRolled) {
+            return { nextState: state, nextTurnUserId: userId, logMessage: 'Roll the dice first.' };
+          }
+
           const tokenIdx = move.tokenIndex ?? 0;
           const dice = state.lastRoll || 1;
           const currentPos = userTokens[tokenIdx] ?? -1;
@@ -64,6 +79,8 @@ export function getBuiltInGameModules(): IGameModule[] {
             newPos = 0; // Released to start square
           } else if (currentPos >= 0 && currentPos + dice <= 106) {
             newPos = currentPos + dice;
+          } else {
+            return { nextState: state, nextTurnUserId: userId, logMessage: 'That token cannot make this move.' };
           }
 
           const updatedUserTokens = [...userTokens];
@@ -77,7 +94,7 @@ export function getBuiltInGameModules(): IGameModule[] {
             Object.keys(nextTokensState).forEach(otherId => {
               if (otherId !== userId) {
                 const otherTokens = nextTokensState[otherId] || [];
-                const updatedOther = otherTokens.map(pos => {
+                const updatedOther = otherTokens.map((pos: number) => {
                   if (pos === newPos) {
                     captureOccurred = true;
                     return -1; // Sent back home!
@@ -91,21 +108,22 @@ export function getBuiltInGameModules(): IGameModule[] {
 
           // Victory check (all 4 tokens at 106)
           const isWinner = updatedUserTokens.every(pos => pos === 106);
-          const extraTurn = dice === 6 || captureOccurred;
+          const extraTurn = (dice === 6 || captureOccurred) && (state.consecutiveSixes || 0) < 3;
 
           return {
             nextState: {
               ...state,
               tokens: nextTokensState,
               lastRoll: null,
-              hasRolled: false
+              hasRolled: false,
+              consecutiveSixes: dice === 6 ? state.consecutiveSixes : 0
             },
-            nextTurnUserId: extraTurn && !isWinner ? userId : undefined,
+            nextTurnUserId: isWinner ? userId : (extraTurn ? userId : getNextPlayerId(players, userId)),
             winnerUserId: isWinner ? userId : undefined,
-            logMessage: isWinner 
+            logMessage: isWinner
               ? `🎉 Ludo Champion! All tokens reached Home!`
-              : captureOccurred 
-                ? `Captured opponent token! Bonus turn granted!` 
+              : captureOccurred
+                ? `Captured opponent token! Bonus turn granted!`
                 : `Moved token to position ${newPos}.`
           };
         }
@@ -153,71 +171,117 @@ export function getBuiltInGameModules(): IGameModule[] {
           hands[p.userId] = deck.splice(0, 7);
         });
 
-        const topCard = deck.pop() || { color: 'red', val: '7' };
+        // The starting card must be a plain colored card — an opening Wild would
+        // leave the required color ambiguous with nobody having chosen one.
+        let topCard = deck.pop() || { color: 'red', val: '7' };
+        const reshuffled: Array<{ color: string; val: string }> = [];
+        while (topCard.color === 'wild' && deck.length > 0) {
+          reshuffled.push(topCard);
+          topCard = deck.pop()!;
+        }
+        deck.push(...reshuffled);
 
         return {
           topCard,
+          activeColor: topCard.color,
           deck,
           hands,
           turnDirection: 1, // 1 for clockwise, -1 for counter-clockwise
           unoCalled: {} // userId -> boolean
         };
       },
-      onTurnMove: (state, userId, move) => {
-        const userHand = state.hands?.[userId] || [];
+      onTurnMove: (state, userId, move, players) => {
+        const userHand: Array<{ color: string; val: string }> = state.hands?.[userId] || [];
+        const direction: 1 | -1 = state.turnDirection === -1 ? -1 : 1;
+
+        const drawCards = (deck: Array<{ color: string; val: string }>, count: number) => {
+          const drawn = deck.splice(Math.max(0, deck.length - count), count);
+          return drawn;
+        };
 
         if (move.action === 'DRAW_CARD') {
           const currentDeck = [...(state.deck || [])];
           if (currentDeck.length === 0) {
-            return { nextState: state, nextTurnUserId: userId, logMessage: 'Deck empty!' };
+            return { nextState: state, nextTurnUserId: getNextPlayerId(players, userId, direction), logMessage: 'Deck is empty — turn passes.' };
           }
-          const drawnCard = currentDeck.pop()!;
+          const [drawnCard] = drawCards(currentDeck, 1);
           const updatedHand = [...userHand, drawnCard];
 
           return {
-            nextState: {
-              ...state,
-              deck: currentDeck,
-              hands: { ...state.hands, [userId]: updatedHand }
-            },
-            nextTurnUserId: userId,
-            logMessage: `Drew a card (${drawnCard.color.toUpperCase()} ${drawnCard.val}).`
+            nextState: { ...state, deck: currentDeck, hands: { ...state.hands, [userId]: updatedHand } },
+            nextTurnUserId: getNextPlayerId(players, userId, direction),
+            logMessage: `Drew a card and passed the turn.`
           };
         }
 
         if (move.action === 'PLAY_CARD') {
-          const playedCard = move.card;
-          const topCard = state.topCard;
+          const playedCard = userHand[move.cardIndex];
+          if (!playedCard) {
+            return { nextState: state, nextTurnUserId: userId, logMessage: 'No such card in hand.' };
+          }
 
-          // Rule check
+          const requiredColor = state.topCard?.color === 'wild' ? state.activeColor : state.topCard?.color;
           const isValid =
             playedCard.color === 'wild' ||
-            playedCard.color === topCard.color ||
-            playedCard.val === topCard.val ||
-            topCard.color === 'wild';
+            playedCard.color === requiredColor ||
+            playedCard.val === state.topCard?.val;
 
           if (!isValid) {
             return { nextState: state, nextTurnUserId: userId, logMessage: 'Invalid card play!' };
           }
 
-          const updatedHand = userHand.filter((c: any, idx: number) => idx !== move.cardIndex);
-          const isWinner = updatedHand.length === 0;
+          if (playedCard.color === 'wild' && !move.chosenColor) {
+            return { nextState: state, nextTurnUserId: userId, logMessage: 'Choose a color to play a Wild card.' };
+          }
 
-          let nextDirection = state.turnDirection || 1;
+          const updatedHand = userHand.filter((_c, idx) => idx !== move.cardIndex);
+          const isWinner = updatedHand.length === 0;
+          const currentDeck = [...(state.deck || [])];
+          const nextHands = { ...state.hands, [userId]: updatedHand };
+          const activeColor = playedCard.color === 'wild' ? move.chosenColor : playedCard.color;
+
+          let nextDirection = direction;
+          let skipToNext = false;
+          let forcedDrawCount = 0;
+
           if (playedCard.val === 'Reverse') {
-            nextDirection = nextDirection * -1;
+            nextDirection = direction * -1;
+            if (players.length === 2) skipToNext = true; // Reverse acts as Skip 1v1
+          } else if (playedCard.val === 'Skip') {
+            skipToNext = true;
+          } else if (playedCard.val === '+2') {
+            forcedDrawCount = 2;
+            skipToNext = true;
+          } else if (playedCard.val === '+4') {
+            forcedDrawCount = 4;
+            skipToNext = true;
+          }
+
+          const immediateNext = getNextPlayerId(players, userId, nextDirection);
+          let finalNextTurnUserId = immediateNext;
+
+          if (forcedDrawCount > 0) {
+            const forcedCards = drawCards(currentDeck, forcedDrawCount);
+            nextHands[immediateNext] = [...(nextHands[immediateNext] || []), ...forcedCards];
+          }
+          if (skipToNext) {
+            finalNextTurnUserId = getNextPlayerId(players, immediateNext, nextDirection);
           }
 
           return {
             nextState: {
               ...state,
               topCard: playedCard,
-              hands: { ...state.hands, [userId]: updatedHand },
+              activeColor,
+              deck: currentDeck,
+              hands: nextHands,
               turnDirection: nextDirection
             },
-            nextTurnUserId: userId,
+            nextTurnUserId: isWinner ? userId : finalNextTurnUserId,
             winnerUserId: isWinner ? userId : undefined,
-            logMessage: isWinner ? `🎉 UNO VICTORY!` : `Played ${playedCard.color.toUpperCase()} ${playedCard.val}`
+            logMessage: isWinner
+              ? `🎉 UNO VICTORY!`
+              : `Played ${playedCard.color === 'wild' ? activeColor.toUpperCase() + ' (Wild)' : playedCard.color.toUpperCase()} ${playedCard.val}${forcedDrawCount ? ` — next player draws ${forcedDrawCount}!` : ''}`
           };
         }
 
@@ -238,15 +302,24 @@ export function getBuiltInGameModules(): IGameModule[] {
         supportedModes: ['SOLO', 'MULTIPLAYER', 'PK_MATCH'],
         howToPlay: 'Align 3 Xs or Os horizontally, vertically, or diagonally to win.'
       },
-      initSessionState: () => ({ grid: Array(9).fill(null), turnSymbol: 'X' }),
-      onTurnMove: (state, userId, move) => {
+      initSessionState: (players) => ({
+        grid: Array(9).fill(null),
+        turnSymbol: 'X',
+        // First player in the session is always X, matching whoever currentTurnUserId
+        // starts as, so turnSymbol and the acting player never drift apart.
+        symbolByUser: players.reduce((acc, p, idx) => ({ ...acc, [p.userId]: idx === 0 ? 'X' : 'O' }), {})
+      }),
+      onTurnMove: (state, userId, move, players) => {
         const grid = [...(state.grid || Array(9).fill(null))];
         const cellIdx = move.index;
-        if (grid[cellIdx] !== null) {
+        if (cellIdx < 0 || cellIdx > 8 || grid[cellIdx] !== null) {
           return { nextState: state, nextTurnUserId: userId, logMessage: 'Cell already occupied!' };
         }
 
-        const symbol = state.turnSymbol || 'X';
+        const symbol = state.symbolByUser?.[userId] || state.turnSymbol || 'X';
+        if (symbol !== state.turnSymbol) {
+          return { nextState: state, nextTurnUserId: userId, logMessage: "It is not this player's symbol's turn." };
+        }
         grid[cellIdx] = symbol;
 
         // Check Win combinations
@@ -261,12 +334,14 @@ export function getBuiltInGameModules(): IGameModule[] {
 
         return {
           nextState: {
+            ...state,
             grid,
             turnSymbol: symbol === 'X' ? 'O' : 'X',
             isDraw
           },
-          nextTurnUserId: userId,
+          nextTurnUserId: isWin || isDraw ? userId : getNextPlayerId(players, userId),
           winnerUserId: isWin ? userId : undefined,
+          matchEnded: isDraw,
           logMessage: isWin ? `🎉 Placed ${symbol} and WON the match!` : isDraw ? `Match ended in a DRAW!` : `Placed ${symbol} at position ${cellIdx + 1}`
         };
       }

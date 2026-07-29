@@ -1,8 +1,22 @@
 import { db } from '../lib/firebase';
-import { doc, setDoc, getDoc, updateDoc, onSnapshot, serverTimestamp, DocumentSnapshot, DocumentData, FirestoreError } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, onSnapshot, runTransaction, serverTimestamp, DocumentSnapshot, DocumentData, FirestoreError } from 'firebase/firestore';
 import { walletService } from './WalletService';
 import { GameDefinition, GameCategory } from '../types';
 import { getBuiltInGameModules } from './GameRegistry';
+
+/**
+ * Returns the userId of the next player in turn order, walking `direction` seats
+ * around the (circular) player list from `currentUserId`. Shared by every game
+ * module so turn rotation is computed the same way everywhere instead of each
+ * module reimplementing (or forgetting to implement) it.
+ */
+export function getNextPlayerId(players: GamePlayer[], currentUserId: string, direction: 1 | -1 = 1): string {
+  if (players.length === 0) return currentUserId;
+  const idx = players.findIndex(p => p.userId === currentUserId);
+  if (idx === -1) return players[0].userId;
+  const nextIdx = (((idx + direction) % players.length) + players.length) % players.length;
+  return players[nextIdx].userId;
+}
 
 export interface GamePlayer {
   userId: string;
@@ -36,11 +50,24 @@ export interface IGameSDK {
   payoutWinnings: (userId: string, amount: number, gameName: string) => Promise<boolean>;
 }
 
+export interface TurnMoveResult {
+  nextState: Record<string, any>;
+  nextTurnUserId: string;
+  winnerUserId?: string;
+  /** True when the match ends with no winner (e.g. a Tic-Tac-Toe draw). */
+  matchEnded?: boolean;
+  logMessage: string;
+}
+
 export interface IGameModule {
   id: string;
   definition: GameDefinition;
   initSessionState: (players: GamePlayer[]) => Record<string, any>;
-  onTurnMove: (currentState: Record<string, any>, userId: string, move: any) => { nextState: Record<string, any>; nextTurnUserId: string; winnerUserId?: string; logMessage: string };
+  /**
+   * `players` is the session's ordered player list — required by any game that
+   * needs to know whose turn comes next (i.e. every turn-based multiplayer game).
+   */
+  onTurnMove: (currentState: Record<string, any>, userId: string, move: any, players: GamePlayer[]) => TurnMoveResult;
 }
 
 export class GameEngine {
@@ -203,38 +230,56 @@ export class GameEngine {
   }
 
   /**
-   * Execute player move via modular engine processing
+   * Execute player move via modular engine processing. Runs inside a transaction so
+   * two rapid submissions (double-tap, retry) can't both apply against the same
+   * stale state, and rejects moves from anyone but the player whose turn it is.
    */
   public async submitMove(sessionId: string, userId: string, movePayload: any): Promise<void> {
     const docRef = doc(db, this.collectionName, sessionId);
-    const snap = await getDoc(docRef);
-    if (!snap.exists()) throw new Error('Session not found');
 
-    const session = snap.data() as EngineGameSession;
-    const module = this.getModule(session.gameId);
-    if (!module) throw new Error('Game module definition missing');
+    const result = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(docRef);
+      if (!snap.exists()) throw new Error('Session not found');
 
-    const { nextState, nextTurnUserId, winnerUserId, logMessage } = module.onTurnMove(
-      session.gameStateData,
-      userId,
-      movePayload
-    );
+      const session = snap.data() as EngineGameSession;
+      if (session.status !== 'IN_PROGRESS') throw new Error('Match is not in progress');
+      if (session.currentTurnUserId !== userId) throw new Error("It is not this player's turn");
 
-    const isFinished = !!winnerUserId;
-    const newLogs = [...(session.historyLogs || []), logMessage];
+      const module = this.getModule(session.gameId);
+      if (!module) throw new Error('Game module definition missing');
 
-    await updateDoc(docRef, {
-      gameStateData: nextState,
-      currentTurnUserId: nextTurnUserId || session.currentTurnUserId,
-      status: isFinished ? 'FINISHED' : session.status,
-      winnerUserId: winnerUserId || null,
-      historyLogs: newLogs
+      const { nextState, nextTurnUserId, winnerUserId, matchEnded, logMessage } = module.onTurnMove(
+        session.gameStateData,
+        userId,
+        movePayload,
+        session.players
+      );
+
+      const isFinished = !!winnerUserId || !!matchEnded;
+      const newLogs = [...(session.historyLogs || []), logMessage];
+
+      tx.update(docRef, {
+        gameStateData: nextState,
+        currentTurnUserId: nextTurnUserId || session.currentTurnUserId,
+        status: isFinished ? 'FINISHED' : session.status,
+        winnerUserId: winnerUserId || null,
+        historyLogs: newLogs
+      });
+
+      return { isFinished, winnerUserId, wagerPoints: session.wagerPoints, players: session.players, gameName: session.gameName };
     });
 
-    if (isFinished && winnerUserId) {
-      const prizePool = session.wagerPoints * session.players.length;
-      if (prizePool > 0) {
-        await this.sdk.payoutWinnings(winnerUserId, prizePool, session.gameName);
+    if (result.isFinished) {
+      if (result.winnerUserId) {
+        const prizePool = result.wagerPoints * result.players.length;
+        if (prizePool > 0) {
+          await this.sdk.payoutWinnings(result.winnerUserId, prizePool, result.gameName);
+        }
+      } else if (result.wagerPoints > 0) {
+        // Match ended with no winner (e.g. a draw) — refund every player's wager.
+        for (const player of result.players) {
+          await this.sdk.payoutWinnings(player.userId, result.wagerPoints, `${result.gameName} Draw Refund`);
+        }
       }
     }
   }
