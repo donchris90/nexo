@@ -1,0 +1,8 @@
+{
+  "firestore": [
+    {
+      "database": "ai-studio-nexoralivesocial-c71b270e-1fb2-4d8e-8852-0f631d691e4e",
+      "rules": "firestore.rules"
+    }
+  ]
+}
