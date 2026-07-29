@@ -117,6 +117,42 @@ export class AgoraManager {
   public getLocalVideoTrack() {
     return this.localVideoTrack;
   }
+
+  /**
+   * Wires up remote user video/audio playback for viewers (audience role).
+   * Plays incoming host video into `container` and unmutes remote audio.
+   * Returns an unsubscribe function to call on cleanup.
+   */
+  public onRemoteVideo(container: HTMLElement, onActiveChange?: (active: boolean) => void) {
+    if (!this.client) return () => {};
+
+    const handlePublished = async (remoteUser: any, mediaType: 'video' | 'audio') => {
+      try {
+        await this.client!.subscribe(remoteUser, mediaType);
+        if (mediaType === 'video' && remoteUser.videoTrack) {
+          remoteUser.videoTrack.play(container);
+          onActiveChange?.(true);
+        }
+        if (mediaType === 'audio' && remoteUser.audioTrack) {
+          remoteUser.audioTrack.play();
+        }
+      } catch (err) {
+        console.warn('Failed to subscribe to remote user media:', err);
+      }
+    };
+
+    const handleUnpublished = (_remoteUser: any, mediaType: 'video' | 'audio') => {
+      if (mediaType === 'video') onActiveChange?.(false);
+    };
+
+    this.client.on('user-published', handlePublished);
+    this.client.on('user-unpublished', handleUnpublished);
+
+    return () => {
+      this.client?.off('user-published', handlePublished);
+      this.client?.off('user-unpublished', handleUnpublished);
+    };
+  }
 }
 
 export const agoraEngine = new AgoraManager();
