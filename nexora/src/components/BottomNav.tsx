@@ -87,7 +87,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           <span className="text-[10px] font-extrabold tracking-tight">Party</span>
         </button>
 
-        {/* CENTER FLOATING GO LIVE ACTION BUTTON (BIGO STYLE) */}
+        {/* CENTER FLOATING GO LIVE ACTION BUTTON */}
         <div className="relative -top-4">
           <button
             onClick={onOpenGoLiveModal}
@@ -100,7 +100,25 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           </button>
         </div>
 
-        {/* TAB 3: CHAT */}
+        {/* TAB 3: GAMES */}
+        <button
+          onClick={() => setActiveTab('games')}
+          className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-2xl transition-all ${
+            activeTab === 'games'
+              ? 'text-purple-400 font-black scale-105'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <div className="relative">
+            <Gamepad2 className="w-5 h-5 text-purple-400" />
+            <span className="absolute -top-1 -right-2 px-1 py-0.2 bg-purple-600 text-white text-[7px] font-black rounded-full">
+              LUDO
+            </span>
+          </div>
+          <span className="text-[10px] font-extrabold tracking-tight">Games</span>
+        </button>
+
+        {/* TAB 4: CHAT */}
         <button
           onClick={() => setActiveTab('chat')}
           className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-2xl transition-all ${

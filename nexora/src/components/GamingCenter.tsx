@@ -1,7 +1,15 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { GameRoom } from '../types';
+import React, { useState, useEffect } from 'react';
+import { GameRoom, GameDefinition, Tournament, DailyGameMission, GameCategory } from '../types';
 import { useEconomy } from '../context/EconomyContext';
 import { gamingLobbyService } from '../services/GamingLobbyService';
+import { gameEngine, EngineGameSession } from '../services/GameEngine';
+import { initializeGameRegistry } from '../services/GameRegistry';
+import { tournamentService } from '../services/TournamentService';
+import { dailyMissionsService } from '../services/DailyMissionsService';
+
+// Ensure game modules are initialized in GameEngine
+initializeGameRegistry();
+
 import { apiFetch } from '../lib/apiConfig';
 import { 
   Gamepad2, 
@@ -19,43 +27,92 @@ import {
   Award,
   Crown,
   Dices,
-  Lock
+  Lock,
+  HelpCircle,
+  Grid,
+  Circle,
+  Square,
+  BarChart2,
+  CloudRain,
+  Box,
+  Split,
+  Smile,
+  UserPlus,
+  Heart,
+  Gift,
+  Tv,
+  Search,
+  Zap,
+  ChevronRight,
+  PlusCircle,
+  Swords,
+  Users2,
+  Layers
 } from 'lucide-react';
 
 export const GamingCenter: React.FC = () => {
-  const { wallet, updateGamePoints } = useEconomy();
-  const [activeGameTab, setActiveGameTab] = useState<'LUDO' | 'LUCKY_WHEEL' | 'QUIZ' | 'UNO' | 'CHESS' | 'LOBBY'>('LUDO');
+  const { wallet, updateGamePoints, authUser } = useEconomy();
+
+  // Navigation Hub Tab
+  const [hubTab, setHubTab] = useState<
+    'TRENDING' | 'CASUAL' | 'PARTY' | 'COIN' | 'HOST' | 'PK' | 'FAMILY' | 'TOURNAMENTS' | 'MISSIONS' | 'LOBBY'
+  >('TRENDING');
+
+  // Search & Filter Query
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Active Selected Game Module for Live Play
+  const [activeGameId, setActiveGameId] = useState<string | null>(null);
+  const [activeMatchSession, setActiveMatchSession] = useState<EngineGameSession | null>(null);
+
+  // Firestore Game Lobby Rooms
   const [gameRooms, setGameRooms] = useState<GameRoom[]>([]);
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [missions, setMissions] = useState<DailyGameMission[]>([]);
 
-  // Real-time Firestore subscription
-  useEffect(() => {
-    const unsub = gamingLobbyService.subscribeToRooms((liveRooms) => {
-      setGameRooms(liveRooms || []);
-    });
-    return () => unsub();
-  }, []);
+  // Modal for Room Creation & Private Invite
+  const [isCreateRoomOpen, setIsCreateRoomOpen] = useState(false);
+  const [newRoomTitle, setNewRoomTitle] = useState('🔥 Fast Wager Ludo Room');
+  const [newRoomGameId, setNewRoomGameId] = useState('LUDO');
+  const [newRoomWager, setNewRoomWager] = useState(500);
+  const [isPrivateRoomOption, setIsPrivateRoomOption] = useState(false);
+  const [createdPrivateCode, setCreatedPrivateCode] = useState<string | null>(null);
+  const [inputInviteCode, setInputInviteCode] = useState<string>('');
+  const [isSearchingQuickMatch, setIsSearchingQuickMatch] = useState(false);
 
-  // Ludo state engine
+  // Modular Game States
+  // Ludo (Full 4-Color Server-Authoritative State)
   const [ludoWager, setLudoWager] = useState<number>(500);
   const [ludoDice, setLudoDice] = useState<number>(6);
   const [isRolling, setIsRolling] = useState(false);
-  const [ludoTokens, setLudoTokens] = useState<number[]>([0, 0, 0, 0]); // 4 tokens positions 0 to 28
-  const [ludoMessage, setLudoMessage] = useState<string>('Roll the dice to start your turn!');
-  const [ludoScore, setLudoScore] = useState<number>(0);
+  const [ludoTurnColor, setLudoTurnColor] = useState<'RED' | 'GREEN' | 'YELLOW' | 'BLUE'>('RED');
+  const [ludoTokensState, setLudoTokensState] = useState<{
+    RED: number[];
+    GREEN: number[];
+    YELLOW: number[];
+    BLUE: number[];
+  }>({
+    RED: [-1, -1, -1, -1],
+    GREEN: [-1, -1, -1, -1],
+    YELLOW: [-1, -1, -1, -1],
+    BLUE: [-1, -1, -1, -1]
+  });
+  const [ludoHasRolled, setLudoHasRolled] = useState(false);
+  const [ludoMessage, setLudoMessage] = useState<string>('RED Turn! Roll the dice to begin.');
 
-  // Lucky Wheel state
+  // Lucky Wheel
   const [wheelWager, setWheelWager] = useState<number>(200);
   const [isWheelSpinning, setIsWheelSpinning] = useState(false);
   const [wheelRotation, setWheelRotation] = useState<number>(0);
   const [wheelResultMsg, setWheelResultMsg] = useState<string>('Select your wager and spin!');
 
-  // Quiz Battle state
+  // AI Quiz
   const [quizQuestion, setQuizQuestion] = useState<{ question: string; options: string[]; correctIndex: number; rewardPoints: number } | null>(null);
   const [quizLoading, setQuizLoading] = useState(false);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [quizResult, setQuizResult] = useState<string | null>(null);
 
-  // Uno Card Game state
+  // Uno Blitz
   const [unoPlayerHand, setUnoPlayerHand] = useState<Array<{ color: string; val: string }>>([
     { color: 'red', val: '7' },
     { color: 'blue', val: 'Wild' },
@@ -65,84 +122,93 @@ export const GamingCenter: React.FC = () => {
   const [unoTopCard, setUnoTopCard] = useState<{ color: string; val: string }>({ color: 'red', val: '5' });
   const [unoMessage, setUnoMessage] = useState<string>('Match color or number!');
 
-  // Roll Ludo Dice
-  const handleRollLudoDice = () => {
-    if (wallet.points < ludoWager) {
-      alert(`Insufficient Points! You need ${ludoWager} Points to play.`);
-      return;
-    }
-    setIsRolling(true);
-    let rolls = 0;
-    const interval = setInterval(() => {
-      setLudoDice(Math.floor(Math.random() * 6) + 1);
-      rolls++;
-      if (rolls >= 8) {
-        clearInterval(interval);
-        const finalDice = Math.floor(Math.random() * 6) + 1;
-        setLudoDice(finalDice);
-        setIsRolling(false);
+  // Coin Flip State
+  const [coinPick, setCoinPick] = useState<'HEADS' | 'TAILS'>('HEADS');
+  const [coinResult, setCoinResult] = useState<string | null>(null);
+  const [isFlipping, setIsFlipping] = useState(false);
 
-        // Advance token
-        setLudoTokens(prev => {
-          const next = [...prev];
-          next[0] = Math.min(28, next[0] + finalDice);
-          return next;
-        });
+  // Truth or Dare Spinner State
+  const [todType, setTodType] = useState<'TRUTH' | 'DARE'>('TRUTH');
+  const [todPrompt, setTodPrompt] = useState<string>('Press Spin to generate a mic seat prompt!');
 
-        if (finalDice === 6) {
-          const winPoints = ludoWager * 2;
-          updateGamePoints(winPoints, `Rolled a 6 in Ludo! Won +${winPoints} Points!`, 'Ludo Master');
-          setLudoMessage(`🎉 JACKPOT ROLL! You rolled a 6 and won +${winPoints} Points!`);
-          setLudoScore(s => s + winPoints);
-        } else {
-          setLudoMessage(`Rolled a ${finalDice}! Moved token forward. Roll again or capture!`);
-        }
-      }
-    }, 100);
-  };
+  // Tic Tac Toe State
+  const [tttGrid, setTttGrid] = useState<Array<string | null>>(Array(9).fill(null));
+  const [tttTurn, setTttTurn] = useState<'X' | 'O'>('X');
+  const [tttMessage, setTttMessage] = useState<string>('Your turn (X)! Tap a cell to play.');
+  const [tttWager, setTttWager] = useState<number>(300);
 
-  // Spin Lucky Wheel
-  const handleSpinWheel = () => {
-    if (wallet.points < wheelWager) {
-      alert(`Insufficient Points to spin! Please exchange Coins or claim Daily Bonus.`);
-      return;
-    }
+  // Connect Four State
+  const [c4Grid, setC4Grid] = useState<number[][]>(Array(6).fill(null).map(() => Array(7).fill(0)));
+  const [c4Turn, setC4Turn] = useState<number>(1);
+  const [c4Message, setC4Message] = useState<string>('Player 1 (Red) turn! Tap a column to drop a disc.');
 
-    setIsWheelSpinning(true);
-    setWheelResultMsg('Spinning the Lucky Wheel...');
+  // Chess State
+  const [chessBoard, setChessBoard] = useState<string[][]>([
+    ['♜', '♞', '♝', '♛', '♚', '♝', '♞', '♜'],
+    ['♟', '♟', '♟', '♟', '♟', '♟', '♟', '♟'],
+    ['', '', '', '', '', '', '', ''],
+    ['', '', '', '', '', '', '', ''],
+    ['', '', '', '', '', '', '', ''],
+    ['', '', '', '', '', '', '', ''],
+    ['♙', '♙', '♙', '♙', '♙', '♙', '♙', '♙'],
+    ['♖', '♘', '♗', '♕', '♔', '♗', '♘', '♖']
+  ]);
+  const [chessSelected, setChessSelected] = useState<[number, number] | null>(null);
+  const [chessMessage, setChessMessage] = useState<string>('White turn! Tap a piece then tap a target square.');
 
-    // Deduct wager first
-    updateGamePoints(-wheelWager, `Wheel Wager: -${wheelWager} Points`, 'Lucky Wheel');
+  // Slots Paradise State
+  const [slotsReels, setSlotsReels] = useState<string[]>(['🎰', '🎰', '🎰']);
+  const [isSlotsSpinning, setIsSlotsSpinning] = useState(false);
+  const [slotsMessage, setSlotsMessage] = useState<string>('Press Spin to try for the 5,000 Pts Jackpot!');
+  const [slotsWager, setSlotsWager] = useState<number>(100);
 
-    const extraTurns = Math.floor(Math.random() * 5) + 5;
-    const multipliers = [0, 0.5, 1.5, 2, 3, 5, 10, 50];
-    const randomIndex = Math.floor(Math.random() * multipliers.length);
-    const chosenMultiplier = multipliers[randomIndex];
+  // Mystery Box State
+  const [boxesOpened, setBoxesOpened] = useState<boolean[]>([false, false, false]);
+  const [boxPrizes, setBoxPrizes] = useState<number[]>([0, 0, 0]);
+  const [boxMessage, setBoxMessage] = useState<string>('Pick a Mystery Box to open your reward!');
 
-    const degreesPerSlice = 360 / multipliers.length;
-    const targetDeg = wheelRotation + (extraTurns * 360) + (randomIndex * degreesPerSlice);
+  // Spin Bottle State
+  const [bottleRotation, setBottleRotation] = useState<number>(0);
+  const [isBottleSpinning, setIsBottleSpinning] = useState<boolean>(false);
+  const [bottleLandedSeat, setBottleLandedSeat] = useState<number | null>(null);
 
-    setWheelRotation(targetDeg);
+  // PK Gift War State
+  const [pkScoreHost1, setPkScoreHost1] = useState<number>(50);
+  const [pkScoreHost2, setPkScoreHost2] = useState<number>(50);
+  const [pkMessage, setPkMessage] = useState<string>('Tap "Send Gift (+10 Pts)" to push the PK meter toward Team 1!');
 
-    setTimeout(() => {
-      setIsWheelSpinning(false);
-      const prize = Math.floor(wheelWager * chosenMultiplier);
+  // Family Guild Boss Raid State
+  const [bossHp, setBossHp] = useState<number>(1000);
+  const [bossCombo, setBossCombo] = useState<number>(0);
+  const [bossMessage, setBossMessage] = useState<string>('Raid Boss spawned! Tap Guild Strike to deal damage.');
 
-      if (prize > 0) {
-        updateGamePoints(prize, `Lucky Wheel Landed ${chosenMultiplier}x! Won +${prize.toLocaleString()} Points!`, 'Lucky Wheel');
-        setWheelResultMsg(`🎉 LANDED ${chosenMultiplier}x MULTIPLIER! Won +${prize.toLocaleString()} Points!`);
-      } else {
-        setWheelResultMsg(`💔 Landed 0x. Try again on the next spin!`);
-      }
-    }, 3500);
-  };
+  // Generic Arena Custom Move State
+  const [genericMoveText, setGenericMoveText] = useState<string>('Strategic Move');
+  const [genericLogs, setGenericLogs] = useState<string[]>(['Session initialized. Ready for turn moves.']);
 
-  // Fetch AI Quiz Question
+  // Subscriptions & Initial Loads
+  useEffect(() => {
+    const unsubLobby = gamingLobbyService.subscribeToRooms((liveRooms) => {
+      setGameRooms(liveRooms || []);
+    });
+
+    const unsubTourn = tournamentService.subscribeToTournaments((liveTourns) => {
+      setTournaments(liveTourns || []);
+    });
+
+    setMissions(dailyMissionsService.getMissions());
+
+    return () => {
+      unsubLobby();
+      unsubTourn();
+    };
+  }, []);
+
+  // Fetch AI Quiz
   const handleFetchQuiz = async () => {
     setQuizLoading(true);
     setSelectedAnswer(null);
     setQuizResult(null);
-
     try {
       const res = await apiFetch('/api/ai/trivia', {
         method: 'POST',
@@ -151,7 +217,7 @@ export const GamingCenter: React.FC = () => {
       });
       const data = await res.json();
       setQuizQuestion(data);
-    } catch (err) {
+    } catch {
       setQuizQuestion({
         question: 'Which currency is used exclusively for multiplayer games & tournaments in NexEconomy?',
         options: ['Coins', 'Points', 'Diamonds', 'Credits'],
@@ -164,423 +230,1538 @@ export const GamingCenter: React.FC = () => {
   };
 
   useEffect(() => {
-    if (activeGameTab === 'QUIZ' && !quizQuestion) {
+    if (activeGameId === 'TRIVIA_QUIZ' && !quizQuestion) {
       handleFetchQuiz();
     }
-  }, [activeGameTab]);
+  }, [activeGameId]);
 
-  const handleAnswerQuiz = (index: number) => {
-    if (!quizQuestion || selectedAnswer !== null) return;
-    setSelectedAnswer(index);
-
-    if (index === quizQuestion.correctIndex) {
-      setQuizResult(`CORRECT! Won +${quizQuestion.rewardPoints} Points!`);
-      updateGamePoints(quizQuestion.rewardPoints, `Quiz Battle Win: +${quizQuestion.rewardPoints} Points`, 'Quiz Battle');
-    } else {
-      setQuizResult(`INCORRECT! Correct answer was: ${quizQuestion.options[quizQuestion.correctIndex]}`);
+  // Quick Match search handler
+  const handleQuickMatch = async (gameId: string) => {
+    setIsSearchingQuickMatch(true);
+    try {
+      const match = await gamingLobbyService.findQuickMatch(gameId, wallet.points);
+      if (match) {
+        setActiveGameId(match.gameId);
+        setLudoMessage(`Matched room "${match.roomCode || match.gameName}"! Match session ready.`);
+      } else {
+        // Fallback: auto-create room if none available
+        const newId = await gamingLobbyService.createRoom({
+          gameId,
+          gameName: gameEngine.getModule(gameId)?.definition.name || gameId,
+          hostName: authUser?.displayName || 'Player',
+          minWagerPoints: 500,
+          maxPlayers: 4,
+          currentPlayers: 1,
+          isPrivate: false,
+          status: 'WAITING',
+          category: 'CASUAL'
+        });
+        setActiveGameId(gameId);
+        setLudoMessage(`Created Quick Match Room #${newId.slice(0, 5)}! Waiting for players...`);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Error joining Quick Match');
+    } finally {
+      setIsSearchingQuickMatch(false);
     }
   };
 
-  // Play Uno Card
-  const handlePlayUnoCard = (card: { color: string; val: string }, idx: number) => {
-    setUnoTopCard(card);
-    setUnoPlayerHand(prev => prev.filter((_, i) => i !== idx));
-
-    if (unoPlayerHand.length <= 1) {
-      const reward = 1000;
-      updateGamePoints(reward, `Uno Victory! Won +${reward} Points!`, 'Uno Blitz');
-      setUnoMessage(`🎉 UNO VICTORY! Cleared all cards and earned +${reward} Points!`);
-    } else {
-      setUnoMessage(`Played ${card.color.toUpperCase()} ${card.val}! Opponent is thinking...`);
+  // Join by 6-digit invite code
+  const handleJoinPrivateCode = async () => {
+    if (!inputInviteCode || inputInviteCode.length !== 6) {
+      alert('Please enter a valid 6-digit Room Invite Code.');
+      return;
+    }
+    try {
+      const room = await gamingLobbyService.joinByRoomCode(inputInviteCode);
+      setActiveGameId(room.gameId);
+      setLudoMessage(`Joined Private Room #${room.roomCode}! Session live.`);
+      setInputInviteCode('');
+    } catch (err: any) {
+      alert(err.message || 'Room code not found or already full.');
     }
   };
+
+  // Roll Ludo Dice
+  const handleRollLudoDice = () => {
+    if (wallet.points < ludoWager && !ludoHasRolled) {
+      alert(`Insufficient Points! You need ${ludoWager} Points to play.`);
+      return;
+    }
+    if (ludoHasRolled) {
+      alert('You have already rolled! Select a token to move.');
+      return;
+    }
+
+    setIsRolling(true);
+    let rolls = 0;
+    const interval = setInterval(() => {
+      setLudoDice(Math.floor(Math.random() * 6) + 1);
+      rolls++;
+      if (rolls >= 8) {
+        clearInterval(interval);
+        const finalDice = Math.floor(Math.random() * 6) + 1;
+        setLudoDice(finalDice);
+        setIsRolling(false);
+        setLudoHasRolled(true);
+
+        const activeTokens = ludoTokensState[ludoTurnColor];
+        const canMove = activeTokens.some(t => (t === -1 && finalDice === 6) || (t >= 0 && t + finalDice <= 106));
+
+        if (!canMove) {
+          setLudoMessage(`Rolled a ${finalDice}! No legal moves. Turn passed.`);
+          setTimeout(() => {
+            setLudoHasRolled(false);
+            const colors: ('RED' | 'GREEN' | 'YELLOW' | 'BLUE')[] = ['RED', 'GREEN', 'YELLOW', 'BLUE'];
+            const nextColor = colors[(colors.indexOf(ludoTurnColor) + 1) % 4];
+            setLudoTurnColor(nextColor);
+            setLudoMessage(`${nextColor} Turn! Roll the dice.`);
+          }, 1200);
+        } else {
+          setLudoMessage(`Rolled a ${finalDice}! Tap one of your highlighted tokens to move.`);
+        }
+      }
+    }, 100);
+  };
+
+  // Move Ludo Token by token Index (0..3)
+  const handleMoveLudoToken = (tokenIdx: number) => {
+    if (!ludoHasRolled) {
+      alert('Please roll the dice first!');
+      return;
+    }
+
+    const currentTokens = ludoTokensState[ludoTurnColor];
+    const pos = currentTokens[tokenIdx];
+
+    if (pos === -1 && ludoDice !== 6) {
+      alert('You need a 6 to release a token from Home!');
+      return;
+    }
+
+    let newPos = pos;
+    if (pos === -1 && ludoDice === 6) {
+      newPos = 0; // Move to start square
+    } else if (pos >= 0 && pos + ludoDice <= 106) {
+      newPos = pos + ludoDice;
+    } else {
+      alert('Cannot move token beyond Home Goal!');
+      return;
+    }
+
+    const updatedTokens = [...currentTokens];
+    updatedTokens[tokenIdx] = newPos;
+
+    // Check capture on non-safe cells
+    const safeCells = [0, 8, 13, 21, 26, 34, 39, 47];
+    let captured = false;
+
+    const nextState = { ...ludoTokensState, [ludoTurnColor]: updatedTokens };
+
+    if (newPos >= 0 && newPos <= 51 && !safeCells.includes(newPos)) {
+      (Object.keys(nextState) as ('RED' | 'GREEN' | 'YELLOW' | 'BLUE')[]).forEach(col => {
+        if (col !== ludoTurnColor) {
+          const opponentTokens = nextState[col];
+          const newOpponentTokens = opponentTokens.map(p => {
+            if (p === newPos) {
+              captured = true;
+              return -1; // Send back home!
+            }
+            return p;
+          });
+          nextState[col] = newOpponentTokens;
+        }
+      });
+    }
+
+    setLudoTokensState(nextState);
+    setLudoHasRolled(false);
+
+    // Check victory
+    const isWinner = updatedTokens.every(p => p === 106);
+    if (isWinner) {
+      const winPrize = ludoWager * 4;
+      updateGamePoints(winPrize, `🏆 Ludo Champion Victory!`, 'Ludo Master');
+      setLudoMessage(`🎉 VICTORY! ${ludoTurnColor} won the match and claimed +${winPrize} Points!`);
+      return;
+    }
+
+    const getExtraTurn = ludoDice === 6 || captured;
+    if (getExtraTurn) {
+      setLudoMessage(`🎉 Bonus Turn for ${ludoTurnColor}! ${captured ? 'Captured token!' : 'Rolled a 6!'}`);
+    } else {
+      const colors: ('RED' | 'GREEN' | 'YELLOW' | 'BLUE')[] = ['RED', 'GREEN', 'YELLOW', 'BLUE'];
+      const nextColor = colors[(colors.indexOf(ludoTurnColor) + 1) % 4];
+      setLudoTurnColor(nextColor);
+      setLudoMessage(`${nextColor} Turn! Roll the dice to move.`);
+    }
+  };
+
+  // Spin Wheel
+  const handleSpinWheel = () => {
+    if (wallet.points < wheelWager) {
+      alert(`Insufficient Points to spin! Please exchange Coins or claim Daily Bonus.`);
+      return;
+    }
+    setIsWheelSpinning(true);
+    setWheelResultMsg('Spinning the Lucky Wheel...');
+    updateGamePoints(-wheelWager, `Wheel Wager: -${wheelWager} Points`, 'Lucky Wheel');
+
+    const extraTurns = Math.floor(Math.random() * 5) + 5;
+    const multipliers = [0, 0.5, 1.5, 2, 3, 5, 10, 50];
+    const randomIndex = Math.floor(Math.random() * multipliers.length);
+    const chosenMultiplier = multipliers[randomIndex];
+    const degreesPerSlice = 360 / multipliers.length;
+    const targetDeg = wheelRotation + (extraTurns * 360) + (randomIndex * degreesPerSlice);
+
+    setWheelRotation(targetDeg);
+
+    setTimeout(() => {
+      setIsWheelSpinning(false);
+      const prize = Math.floor(wheelWager * chosenMultiplier);
+      if (prize > 0) {
+        updateGamePoints(prize, `Lucky Wheel Landed ${chosenMultiplier}x! Won +${prize.toLocaleString()} Points!`, 'Lucky Wheel');
+        setWheelResultMsg(`🎉 LANDED ${chosenMultiplier}x MULTIPLIER! Won +${prize.toLocaleString()} Points!`);
+      } else {
+        setWheelResultMsg(`💔 Landed 0x. Try again on the next spin!`);
+      }
+    }, 3000);
+  };
+
+  // Flip Coin
+  const handleFlipCoin = () => {
+    const wager = 500;
+    if (wallet.points < wager) {
+      alert('Insufficient Points to flip coin!');
+      return;
+    }
+    setIsFlipping(true);
+    setCoinResult('Flipping coin in 3D arena...');
+    updateGamePoints(-wager, `Coin Flip Wager: -${wager} Points`, 'Coin Flip');
+
+    setTimeout(() => {
+      setIsFlipping(false);
+      const isHeads = Math.random() > 0.5;
+      const outcome = isHeads ? 'HEADS' : 'TAILS';
+      const won = outcome === coinPick;
+
+      if (won) {
+        const prize = wager * 2;
+        updateGamePoints(prize, `Coin Flip Win! Double Up +${prize} Points!`, 'Coin Flip');
+        setCoinResult(`🎉 Coin landed on ${outcome}! YOU DOUBLED UP (+${prize} Points)!`);
+      } else {
+        setCoinResult(`💔 Coin landed on ${outcome}. Opponent claimed wager.`);
+      }
+    }, 1500);
+  };
+
+  // Spin Truth or Dare
+  const handleSpinTruthOrDare = () => {
+    const truths = [
+      'What is your favorite moment in this live room?',
+      'Who in this party room has the best voice?',
+      'What is your biggest secret streaming talent?'
+    ];
+    const dares = [
+      'Sing a 15-second song snippet on your mic seat!',
+      'Send a Dragon gift to the top host seat!',
+      'Impersonate your favorite anime or movie character!'
+    ];
+
+    const list = todType === 'TRUTH' ? truths : dares;
+    const chosen = list[Math.floor(Math.random() * list.length)];
+    setTodPrompt(chosen);
+  };
+
+  // All Definitions from Engine
+  const allDefinitions = gameEngine.getAllDefinitions();
+  const filteredDefinitions = allDefinitions.filter(d => {
+    const matchesCategory = hubTab === 'TRENDING' ? (d.isPopular || d.category === 'CASUAL') : d.category === hubTab;
+    const matchesSearch = searchQuery === '' || d.name.toLowerCase().includes(searchQuery.toLowerCase()) || d.description.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesCategory && matchesSearch;
+  });
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-      {/* GAMING HEADER */}
+    <div className="max-w-7xl mx-auto px-4 py-6 space-y-6 pb-28">
+      {/* 1. GAMING HUB HEADER */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <span className="px-3 py-1 bg-purple-500/20 text-purple-300 font-black text-xs rounded-full border border-purple-500/30 uppercase tracking-widest flex items-center gap-1">
-              <Gamepad2 className="w-4 h-4 text-purple-400" /> Multi-Game Hub
+              <Gamepad2 className="w-4 h-4 text-purple-400" /> Modular Game Engine Hub
             </span>
             <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 font-bold text-xs rounded-full border border-emerald-500/30 flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5" /> Anti-Cheat Protected
+              <ShieldCheck className="w-3.5 h-3.5" /> Anti-Cheat & Firestore Sync
             </span>
           </div>
-          <h2 className="text-2xl font-black text-slate-100 mt-2">
-            Entertainment Gaming Arena
+          <h2 className="text-2xl sm:text-3xl font-black text-slate-100 mt-2">
+            Nexora Multi-Game Arena
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            Wager Points, compete in tournaments, climb season leaderboards, and win rewards. (Points cannot be withdrawn as cash).
+          <p className="text-xs text-slate-400 mt-1 max-w-2xl">
+            Play Casual, Party, Coin, Host, and PK Games. Wager points, compete in scheduled tournaments, and claim daily mission rewards.
           </p>
         </div>
 
-        <div className="flex items-center gap-4 bg-slate-950 px-5 py-3 rounded-2xl border border-slate-800">
+        <div className="flex items-center gap-4 bg-slate-950 px-5 py-3 rounded-2xl border border-slate-800 shadow-xl">
           <div>
-            <div className="text-[10px] uppercase font-extrabold text-purple-400">Available Gaming Points</div>
+            <div className="text-[10px] uppercase font-extrabold text-purple-400">Available Wager Points</div>
             <div className="text-lg font-black text-purple-300 flex items-center gap-1">
               🎯 {wallet.points.toLocaleString()} Points
             </div>
           </div>
+          <button
+            onClick={() => setHubTab('MISSIONS')}
+            className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl shadow hover:opacity-90 flex items-center gap-1"
+          >
+            <Trophy className="w-4 h-4" /> Daily Missions
+          </button>
         </div>
       </div>
 
-      {/* GAME TABS */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar">
-        {[
-          { id: 'LUDO', label: 'Ludo Arena', icon: Dices },
-          { id: 'LUCKY_WHEEL', label: 'Lucky Wheel', icon: Sparkles },
-          { id: 'QUIZ', label: 'AI Quiz Battle', icon: Brain },
-          { id: 'UNO', label: 'Uno Blitz', icon: Play },
-          { id: 'LOBBY', label: 'Public Game Rooms', icon: Users }
-        ].map(tab => {
-          const Icon = tab.icon;
-          const isAct = activeGameTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveGameTab(tab.id as any)}
-              className={`px-5 py-2.5 rounded-2xl text-xs font-black tracking-wide flex items-center gap-2 transition-all whitespace-nowrap ${
-                isAct
-                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-500/25 border border-purple-400/40'
-                  : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Icon className="w-4 h-4 text-amber-300" />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* GAME 1: LUDO ARENA */}
-      {activeGameTab === 'LUDO' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6">
-            <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-slate-800 pb-4 gap-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h3 className="font-extrabold text-lg text-slate-100 flex items-center gap-2">
-                    <Dices className="w-5 h-5 text-amber-400" /> Real-time Ludo Match Server
-                  </h3>
-                  <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-mono font-bold rounded-full">
-                    ROOM #LUDO-8821 • SERVER AUTHORITATIVE
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400 mt-0.5">Player 1: Alex Rivers (You) VS Player 2: DragonMaster (AI Opponent)</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-300">Match Wager:</span>
-                {[100, 500, 1000].map(w => (
-                  <button
-                    key={w}
-                    onClick={() => setLudoWager(w)}
-                    className={`px-3 py-1 text-xs font-black rounded-lg ${
-                      ludoWager === w ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
-                    }`}
-                  >
-                    {w} Pts
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* LUDO BOARD CANVAS / GRID */}
-            <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 flex flex-col items-center justify-center space-y-6">
-              <div className="w-full max-w-md aspect-square bg-slate-900 rounded-2xl border-2 border-amber-500/30 grid grid-cols-5 gap-2 p-4 relative">
-                {/* 4 CORNER HOUSES */}
-                <div className="bg-red-500/20 border border-red-500/50 rounded-xl p-3 flex flex-col items-center justify-center">
-                  <span className="text-xs font-extrabold text-red-400">RED HOUSE</span>
-                  <div className="w-6 h-6 rounded-full bg-red-500 mt-2 shadow-lg animate-pulse" />
-                </div>
-                <div className="col-span-3 bg-slate-950/80 rounded-xl border border-slate-800 p-2 text-center flex items-center justify-center text-xs font-bold text-slate-400">
-                  TRACK WAY
-                </div>
-                <div className="bg-green-500/20 border border-green-500/50 rounded-xl p-3 flex flex-col items-center justify-center">
-                  <span className="text-xs font-extrabold text-green-400">GREEN HOUSE</span>
-                  <div className="w-6 h-6 rounded-full bg-green-500 mt-2 shadow-lg" />
-                </div>
-
-                <div className="col-span-5 bg-slate-950/90 rounded-xl p-4 border border-amber-500/40 text-center space-y-2">
-                  <span className="text-xs font-extrabold text-amber-300 uppercase tracking-widest">
-                    Token Track Progress ({ludoTokens[0]} / 28)
-                  </span>
-                  <div className="w-full h-4 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
-                    <div
-                      className="h-full bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 transition-all duration-500"
-                      style={{ width: `${(ludoTokens[0] / 28) * 100}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div className="bg-yellow-500/20 border border-yellow-500/50 rounded-xl p-3 flex flex-col items-center justify-center">
-                  <span className="text-xs font-extrabold text-yellow-400">YELLOW HOUSE</span>
-                  <div className="w-6 h-6 rounded-full bg-yellow-500 mt-2 shadow-lg" />
-                </div>
-                <div className="col-span-3 bg-slate-950/80 rounded-xl border border-slate-800 p-2 text-center flex items-center justify-center text-xs font-bold text-amber-400 font-mono">
-                  ★ HOME FINISH GOAL ★
-                </div>
-                <div className="bg-blue-500/20 border border-blue-500/50 rounded-xl p-3 flex flex-col items-center justify-center">
-                  <span className="text-xs font-extrabold text-blue-400">BLUE HOUSE</span>
-                  <div className="w-6 h-6 rounded-full bg-blue-500 mt-2 shadow-lg" />
-                </div>
-              </div>
-
-              {/* DICE ROLL CONTROL */}
-              <div className="flex flex-col items-center gap-4">
-                <div className="w-20 h-20 bg-gradient-to-br from-amber-400 via-orange-500 to-red-500 rounded-2xl flex items-center justify-center text-4xl font-black text-slate-950 shadow-2xl ring-4 ring-amber-300/40 animate-bounce">
-                  {ludoDice}
-                </div>
-                <p className="text-xs font-bold text-amber-300 text-center max-w-sm">{ludoMessage}</p>
-                <button
-                  onClick={handleRollLudoDice}
-                  disabled={isRolling}
-                  className="px-8 py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black text-sm rounded-2xl shadow-xl shadow-amber-500/20 uppercase tracking-wider flex items-center gap-2"
-                >
-                  <RotateCw className={`w-4 h-4 ${isRolling ? 'animate-spin' : ''}`} />
-                  {isRolling ? 'Rolling Dice...' : `Roll Dice (-${ludoWager} Pts)`}
-                </button>
-              </div>
-            </div>
+      {/* 2. SEARCH & NAVIGATION CATEGORY TABS */}
+      <div className="space-y-3">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="relative w-full sm:w-80">
+            <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              placeholder="Search games, tournaments, modes..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-2xl text-xs font-bold text-white focus:outline-none focus:border-purple-500"
+            />
           </div>
 
-          {/* RIGHT COL: MATCH STATS & LEADERBOARD */}
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4">
-            <h3 className="font-extrabold text-sm text-slate-100 uppercase tracking-wider flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-amber-400" /> Season 8 Ludo Champions
-            </h3>
-            <div className="space-y-2">
-              {[
-                { rank: 1, name: 'DragonMasterX', pts: '128,500', badge: '🥇 Gold' },
-                { rank: 2, name: 'Aria Nova', pts: '94,200', badge: '🥈 Silver' },
-                { rank: 3, name: 'Alex Rivers (You)', pts: wallet.points.toLocaleString(), badge: '🥉 Bronze' },
-                { rank: 4, name: 'CyberGamer', pts: '41,000', badge: 'Top 10' }
-              ].map(r => (
-                <div key={r.rank} className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="font-black text-xs text-amber-400">#{r.rank}</span>
-                    <div>
-                      <p className="font-bold text-xs text-slate-200">{r.name}</p>
-                      <span className="text-[10px] text-slate-500">{r.badge}</span>
+          <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto no-scrollbar">
+            <button
+              onClick={() => setIsCreateRoomOpen(true)}
+              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-black text-xs rounded-2xl shadow flex items-center gap-1.5 whitespace-nowrap shrink-0"
+            >
+              <PlusCircle className="w-4 h-4" /> Create Custom Room
+            </button>
+          </div>
+        </div>
+
+        {/* CATEGORY TABS */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar">
+          {[
+            { id: 'TRENDING', label: '🔥 Trending & Popular' },
+            { id: 'CASUAL', label: '🎮 Casual Games' },
+            { id: 'PARTY', label: '🎲 Party Games' },
+            { id: 'COIN', label: '🎰 Coin Games' },
+            { id: 'HOST', label: '🎤 Host & Live Games' },
+            { id: 'PK', label: '⚔️ PK Battles' },
+            { id: 'FAMILY', label: '👨‍👩‍👧 Family & Agency' },
+            { id: 'TOURNAMENTS', label: '🏆 Tournaments' },
+            { id: 'MISSIONS', label: '🎯 Daily Missions' },
+            { id: 'LOBBY', label: '🚪 Public Lobbies' }
+          ].map(tab => {
+            const isAct = hubTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setHubTab(tab.id as any)}
+                className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                  isAct
+                    ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 text-white shadow-lg shadow-purple-500/25 border border-purple-400/40'
+                    : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3. ACTIVE PLAY GAME MODAL / EMBEDDED VIEW */}
+      {activeGameId && (
+        <div className="bg-slate-900 border-2 border-purple-500/50 rounded-3xl p-6 shadow-2xl relative animate-fade-in space-y-6">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div className="flex items-center gap-3">
+              <span className="p-2.5 bg-purple-950 text-purple-300 rounded-2xl border border-purple-800">
+                <Gamepad2 className="w-5 h-5" />
+              </span>
+              <div>
+                <h3 className="font-extrabold text-lg text-slate-100 uppercase tracking-wider">
+                  {gameEngine.getModule(activeGameId)?.definition.name || activeGameId}
+                </h3>
+                <span className="text-xs text-emerald-400 font-mono">● LIVE GAME SESSION ACTIVE</span>
+              </div>
+            </div>
+            <button
+              onClick={() => setActiveGameId(null)}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-2xl border border-slate-700"
+            >
+              Exit Game
+            </button>
+          </div>
+
+          {/* GAME SPECIFIC MODULE CANVAS */}
+          {activeGameId === 'LUDO' && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="lg:col-span-2 bg-slate-950 p-6 rounded-2xl border border-slate-800 flex flex-col items-center justify-center space-y-6">
+                
+                {/* TURN INDICATOR HEADER */}
+                <div className="w-full flex items-center justify-between p-3 bg-slate-900 rounded-2xl border border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-3 h-3 rounded-full animate-ping ${
+                      ludoTurnColor === 'RED' ? 'bg-red-500' :
+                      ludoTurnColor === 'GREEN' ? 'bg-emerald-500' :
+                      ludoTurnColor === 'YELLOW' ? 'bg-amber-400' : 'bg-blue-500'
+                    }`} />
+                    <span className="font-extrabold text-xs text-white">Current Turn: {ludoTurnColor}</span>
+                  </div>
+                  <span className="text-[11px] font-mono text-amber-300">Safe Stars: ★ #0, #8, #13, #21, #26, #34, #39, #47</span>
+                </div>
+
+                {/* 4-CORNER LUDO BOARD CANVAS */}
+                <div className="w-full max-w-md aspect-square bg-slate-900 rounded-2xl border-2 border-amber-500/40 p-4 grid grid-cols-3 gap-3 relative">
+                  
+                  {/* TOP-LEFT: RED YARD */}
+                  <div className={`p-3 rounded-2xl border flex flex-col justify-between ${
+                    ludoTurnColor === 'RED' ? 'bg-red-950/80 border-red-500 shadow-lg shadow-red-500/20' : 'bg-red-950/30 border-red-900/40'
+                  }`}>
+                    <span className="text-[11px] font-black text-red-400 uppercase tracking-wider">RED HOUSE</span>
+                    <div className="grid grid-cols-2 gap-2 my-2">
+                      {ludoTokensState.RED.map((pos, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => ludoTurnColor === 'RED' && handleMoveLudoToken(idx)}
+                          disabled={ludoTurnColor !== 'RED' || !ludoHasRolled}
+                          className={`p-1.5 rounded-xl border text-[10px] font-black flex flex-col items-center justify-center transition-all ${
+                            pos === -1
+                              ? 'bg-red-500/20 border-red-500/50 text-red-300 hover:scale-105'
+                              : pos === 106
+                              ? 'bg-amber-400 text-slate-950 border-amber-300 font-extrabold'
+                              : 'bg-red-600 text-white border-white shadow'
+                          }`}
+                        >
+                          <span className="text-[9px]">T{idx + 1}</span>
+                          <span className="text-[8px] font-mono">{pos === -1 ? 'HOME' : pos === 106 ? 'GOAL' : `#${pos}`}</span>
+                        </button>
+                      ))}
                     </div>
                   </div>
-                  <span className="font-extrabold text-xs text-purple-300">🎯 {r.pts} Pts</span>
+
+                  {/* TOP-MIDDLE: GREEN FINISH STRETCH & SAFE */}
+                  <div className="bg-slate-950/80 rounded-2xl border border-slate-800 p-2 flex flex-col justify-center items-center gap-1">
+                    <span className="text-[9px] font-extrabold text-emerald-400">★ SAFE #8</span>
+                    <div className="w-full text-[9px] font-mono text-slate-400 text-center">GREEN STRETCH</div>
+                    <span className="text-[9px] font-extrabold text-amber-300">★ SAFE #13</span>
+                  </div>
+
+                  {/* TOP-RIGHT: GREEN YARD */}
+                  <div className={`p-3 rounded-2xl border flex flex-col justify-between ${
+                    ludoTurnColor === 'GREEN' ? 'bg-emerald-950/80 border-emerald-500 shadow-lg shadow-emerald-500/20' : 'bg-emerald-950/30 border-emerald-900/40'
+                  }`}>
+                    <span className="text-[11px] font-black text-emerald-400 uppercase tracking-wider">GREEN HOUSE</span>
+                    <div className="grid grid-cols-2 gap-2 my-2">
+                      {ludoTokensState.GREEN.map((pos, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => ludoTurnColor === 'GREEN' && handleMoveLudoToken(idx)}
+                          disabled={ludoTurnColor !== 'GREEN' || !ludoHasRolled}
+                          className={`p-1.5 rounded-xl border text-[10px] font-black flex flex-col items-center justify-center transition-all ${
+                            pos === -1
+                              ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 hover:scale-105'
+                              : pos === 106
+                              ? 'bg-amber-400 text-slate-950 border-amber-300 font-extrabold'
+                              : 'bg-emerald-600 text-white border-white shadow'
+                          }`}
+                        >
+                          <span className="text-[9px]">T{idx + 1}</span>
+                          <span className="text-[8px] font-mono">{pos === -1 ? 'HOME' : pos === 106 ? 'GOAL' : `#${pos}`}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* MIDDLE-LEFT & RIGHT: SAFE TRACKS */}
+                  <div className="bg-slate-950/80 rounded-2xl border border-slate-800 p-2 flex flex-col justify-center items-center">
+                    <span className="text-[9px] font-extrabold text-red-400">★ SAFE #0</span>
+                    <span className="text-[8px] text-slate-500 font-mono">RED START</span>
+                  </div>
+
+                  {/* CENTER TRIANGLE FINISH GOAL */}
+                  <div className="bg-gradient-to-tr from-purple-950 via-indigo-950 to-slate-950 border-2 border-amber-400/60 rounded-2xl p-2 flex flex-col items-center justify-center text-center shadow-inner">
+                    <span className="text-xs font-black text-amber-300 uppercase tracking-wider">LUDO GOAL</span>
+                    <span className="text-[9px] font-mono text-purple-300">★ 4 TOKENS ★</span>
+                  </div>
+
+                  <div className="bg-slate-950/80 rounded-2xl border border-slate-800 p-2 flex flex-col justify-center items-center">
+                    <span className="text-[9px] font-extrabold text-blue-400">★ SAFE #26</span>
+                    <span className="text-[8px] text-slate-500 font-mono">BLUE START</span>
+                  </div>
+
+                  {/* BOTTOM-LEFT: YELLOW YARD */}
+                  <div className={`p-3 rounded-2xl border flex flex-col justify-between ${
+                    ludoTurnColor === 'YELLOW' ? 'bg-amber-950/80 border-amber-500 shadow-lg shadow-amber-500/20' : 'bg-amber-950/30 border-amber-900/40'
+                  }`}>
+                    <span className="text-[11px] font-black text-amber-400 uppercase tracking-wider">YELLOW HOUSE</span>
+                    <div className="grid grid-cols-2 gap-2 my-2">
+                      {ludoTokensState.YELLOW.map((pos, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => ludoTurnColor === 'YELLOW' && handleMoveLudoToken(idx)}
+                          disabled={ludoTurnColor !== 'YELLOW' || !ludoHasRolled}
+                          className={`p-1.5 rounded-xl border text-[10px] font-black flex flex-col items-center justify-center transition-all ${
+                            pos === -1
+                              ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 hover:scale-105'
+                              : pos === 106
+                              ? 'bg-amber-400 text-slate-950 border-amber-300 font-extrabold'
+                              : 'bg-amber-500 text-slate-950 border-white shadow'
+                          }`}
+                        >
+                          <span className="text-[9px]">T{idx + 1}</span>
+                          <span className="text-[8px] font-mono">{pos === -1 ? 'HOME' : pos === 106 ? 'GOAL' : `#${pos}`}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* BOTTOM-MIDDLE: BLUE STRETCH */}
+                  <div className="bg-slate-950/80 rounded-2xl border border-slate-800 p-2 flex flex-col justify-center items-center gap-1">
+                    <span className="text-[9px] font-extrabold text-amber-300">★ SAFE #39</span>
+                    <div className="w-full text-[9px] font-mono text-slate-400 text-center">BLUE STRETCH</div>
+                    <span className="text-[9px] font-extrabold text-blue-400">★ SAFE #47</span>
+                  </div>
+
+                  {/* BOTTOM-RIGHT: BLUE YARD */}
+                  <div className={`p-3 rounded-2xl border flex flex-col justify-between ${
+                    ludoTurnColor === 'BLUE' ? 'bg-blue-950/80 border-blue-500 shadow-lg shadow-blue-500/20' : 'bg-blue-950/30 border-blue-900/40'
+                  }`}>
+                    <span className="text-[11px] font-black text-blue-400 uppercase tracking-wider">BLUE HOUSE</span>
+                    <div className="grid grid-cols-2 gap-2 my-2">
+                      {ludoTokensState.BLUE.map((pos, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => ludoTurnColor === 'BLUE' && handleMoveLudoToken(idx)}
+                          disabled={ludoTurnColor !== 'BLUE' || !ludoHasRolled}
+                          className={`p-1.5 rounded-xl border text-[10px] font-black flex flex-col items-center justify-center transition-all ${
+                            pos === -1
+                              ? 'bg-blue-500/20 border-blue-500/50 text-blue-300 hover:scale-105'
+                              : pos === 106
+                              ? 'bg-amber-400 text-slate-950 border-amber-300 font-extrabold'
+                              : 'bg-blue-600 text-white border-white shadow'
+                          }`}
+                        >
+                          <span className="text-[9px]">T{idx + 1}</span>
+                          <span className="text-[8px] font-mono">{pos === -1 ? 'HOME' : pos === 106 ? 'GOAL' : `#${pos}`}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* GAME 2: LUCKY WHEEL */}
-      {activeGameTab === 'LUCKY_WHEEL' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 flex flex-col items-center justify-center space-y-6">
-          <div className="text-center space-y-2">
-            <h3 className="text-2xl font-black text-slate-100 flex items-center justify-center gap-2">
-              <Sparkles className="w-6 h-6 text-amber-400" /> Lucky Spin Wheel Jackpot
-            </h3>
-            <p className="text-xs text-slate-400 max-w-md">
-              Spin the wheel to win up to 50x your Points wager!
-            </p>
-          </div>
-
-          {/* SPINNING WHEEL DISPLAY */}
-          <div className="relative w-72 h-72 rounded-full border-8 border-amber-500/40 shadow-[0_0_50px_rgba(245,158,11,0.3)] flex items-center justify-center overflow-hidden bg-slate-950">
-            <div
-              className="absolute inset-0 rounded-full transition-transform duration-3000 ease-out flex items-center justify-center"
-              style={{ transform: `rotate(${wheelRotation}deg)` }}
-            >
-              <div className="w-full h-full rounded-full border-4 border-amber-400/20 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-indigo-900 via-purple-950 to-slate-950 flex items-center justify-center">
-                <span className="text-3xl font-black text-amber-300 tracking-widest">
-                  0x • 1.5x • 2x • 5x • 10x • 50x
-                </span>
-              </div>
-            </div>
-            {/* WHEEL POINTER */}
-            <div className="absolute top-2 w-6 h-8 bg-amber-400 clip-path-polygon text-slate-950 flex items-center justify-center font-black text-xs z-10 rounded-b-md shadow-lg">
-              ▼
-            </div>
-          </div>
-
-          {/* RESULT MSG */}
-          <p className="text-sm font-extrabold text-amber-300 bg-slate-950 px-6 py-2 rounded-xl border border-amber-500/30">
-            {wheelResultMsg}
-          </p>
-
-          {/* WAGER CONTROLS */}
-          <div className="flex flex-wrap items-center justify-center gap-4">
-            <div className="flex items-center gap-2 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800">
-              <span className="text-xs font-bold text-slate-400">Wager:</span>
-              {[100, 200, 500, 1000].map(w => (
-                <button
-                  key={w}
-                  onClick={() => setWheelWager(w)}
-                  className={`px-3 py-1 text-xs font-black rounded-lg ${
-                    wheelWager === w ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400'
-                  }`}
-                >
-                  {w} Pts
-                </button>
-              ))}
-            </div>
-
-            <button
-              onClick={handleSpinWheel}
-              disabled={isWheelSpinning}
-              className="px-8 py-3 bg-gradient-to-r from-purple-600 via-indigo-600 to-pink-600 hover:opacity-90 text-white font-black text-sm rounded-2xl shadow-xl shadow-purple-500/25 uppercase tracking-wider flex items-center gap-2"
-            >
-              <RotateCw className={`w-4 h-4 ${isWheelSpinning ? 'animate-spin' : ''}`} />
-              {isWheelSpinning ? 'Spinning...' : `Spin Wheel (-${wheelWager} Pts)`}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* GAME 3: AI QUIZ BATTLE */}
-      {activeGameTab === 'QUIZ' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-3xl mx-auto space-y-6">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-            <div className="flex items-center gap-2">
-              <Brain className="w-6 h-6 text-purple-400" />
-              <h3 className="font-extrabold text-lg text-slate-100">AI Trivia Speed Showdown</h3>
-            </div>
-            <button
-              onClick={handleFetchQuiz}
-              disabled={quizLoading}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl flex items-center gap-1.5"
-            >
-              <RotateCw className={`w-3.5 h-3.5 ${quizLoading ? 'animate-spin' : ''}`} />
-              Next Question
-            </button>
-          </div>
-
-          {quizLoading ? (
-            <div className="p-8 text-center text-slate-400 text-sm font-medium animate-pulse">
-              Generating dynamic Gemini 3.6 AI trivia question...
-            </div>
-          ) : quizQuestion ? (
-            <div className="space-y-6">
-              <div className="p-5 bg-slate-950 rounded-2xl border border-purple-500/30">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] font-black uppercase text-purple-400 tracking-wider">AI Live Question</span>
-                  <span className="text-xs font-extrabold text-amber-400">Reward: +{quizQuestion.rewardPoints} Points</span>
-                </div>
-                <h4 className="text-base font-black text-slate-100 leading-snug">{quizQuestion.question}</h4>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {quizQuestion.options.map((opt, idx) => {
-                  const isSelected = selectedAnswer === idx;
-                  const isCorrect = idx === quizQuestion.correctIndex;
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => handleAnswerQuiz(idx)}
-                      disabled={selectedAnswer !== null}
-                      className={`p-4 rounded-xl border text-left font-bold text-xs transition-all ${
-                        selectedAnswer === null
-                          ? 'bg-slate-950 border-slate-800 hover:border-purple-500 text-slate-200'
-                          : isCorrect
-                          ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200'
-                          : isSelected
-                          ? 'bg-red-950/80 border-red-500 text-red-200'
-                          : 'bg-slate-950/50 border-slate-900 text-slate-500'
-                      }`}
-                    >
-                      <span className="mr-2 text-slate-500">{String.fromCharCode(65 + idx)}.</span>
-                      {opt}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {quizResult && (
-                <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-center font-black text-sm text-amber-300 animate-fadeIn">
-                  {quizResult}
-                </div>
-              )}
-            </div>
-          ) : null}
-        </div>
-      )}
-
-      {/* GAME 4: UNO BLITZ */}
-      {activeGameTab === 'UNO' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-            <h3 className="font-extrabold text-lg text-slate-100 flex items-center gap-2">
-              <Play className="w-5 h-5 text-indigo-400" /> Uno Color Blitz Match
-            </h3>
-            <span className="text-xs font-bold text-purple-300">Reward: +1,000 Points on Clearance</span>
-          </div>
-
-          <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 text-center space-y-6">
-            <p className="text-xs font-bold text-amber-300">{unoMessage}</p>
-
-            {/* TOP CARD DISCARD PILE */}
-            <div className="flex flex-col items-center gap-2">
-              <span className="text-[10px] text-slate-500 uppercase font-black">Top Discard Pile</span>
-              <div className="w-24 h-36 rounded-2xl bg-slate-900 border-2 border-slate-700 flex flex-col items-center justify-center p-3 shadow-2xl">
-                <span className="text-xs font-black uppercase text-amber-400">{unoTopCard.color}</span>
-                <span className="text-3xl font-black text-slate-100">{unoTopCard.val}</span>
-              </div>
-            </div>
-
-            {/* PLAYER HAND */}
-            <div className="space-y-2">
-              <span className="text-[10px] text-slate-400 uppercase font-extrabold">Your Card Hand ({unoPlayerHand.length})</span>
-              <div className="flex flex-wrap items-center justify-center gap-3">
-                {unoPlayerHand.map((c, idx) => (
+                {/* DICE CONTROLLER */}
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-16 h-16 bg-gradient-to-br from-amber-400 to-red-500 rounded-2xl flex items-center justify-center text-3xl font-black text-slate-950 shadow-2xl animate-bounce">
+                    {ludoDice}
+                  </div>
+                  <p className="text-xs font-bold text-amber-300 text-center">{ludoMessage}</p>
                   <button
-                    key={idx}
-                    onClick={() => handlePlayUnoCard(c, idx)}
-                    className="w-20 h-32 rounded-xl bg-slate-900 border border-slate-700 hover:border-amber-400 flex flex-col items-center justify-center p-2 shadow-xl hover:scale-105 transition-all"
+                    onClick={handleRollLudoDice}
+                    disabled={isRolling || ludoHasRolled}
+                    className="px-6 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-xl shadow uppercase flex items-center gap-2 disabled:opacity-50"
                   >
-                    <span className="text-[10px] font-extrabold uppercase text-cyan-400">{c.color}</span>
-                    <span className="text-2xl font-black text-slate-100">{c.val}</span>
+                    <RotateCw className={`w-4 h-4 ${isRolling ? 'animate-spin' : ''}`} />
+                    {isRolling ? 'Rolling...' : ludoHasRolled ? 'Select Token Below' : `Roll Dice (-${ludoWager} Pts)`}
                   </button>
-                ))}
+                </div>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* GAME 5: PUBLIC LOBBY ROOMS */}
-      {activeGameTab === 'LOBBY' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {gameRooms.length === 0 && (
-            <div className="md:col-span-2 lg:col-span-3 text-center py-14 text-sm text-slate-500">
-              No public lobby rooms open right now.
+              {/* STATS & PLAYERS */}
+              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3">
+                <h4 className="text-xs font-black text-slate-200 uppercase">Match Wager & Players</h4>
+                <div className="p-3 bg-slate-900 rounded-xl border border-slate-800 flex justify-between text-xs">
+                  <span className="text-slate-400">Match Pool:</span>
+                  <span className="font-extrabold text-amber-300">{ludoWager * 2} Points</span>
+                </div>
+                <div className="space-y-2">
+                  <div className="p-2.5 bg-purple-950/40 border border-purple-500/30 rounded-xl flex items-center justify-between text-xs">
+                    <span className="font-bold text-purple-300">Alex Rivers (You)</span>
+                    <span className="text-emerald-400">Ready</span>
+                  </div>
+                  <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-300">CyberGamer (AI)</span>
+                    <span className="text-slate-400">Waiting</span>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
-          {gameRooms.map(g => (
-            <div key={g.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 hover:border-purple-500/50 transition-all">
-              <div className="flex items-center justify-between">
-                <span className="px-2.5 py-0.5 bg-purple-500/20 text-purple-300 text-[10px] font-black rounded-full uppercase">
-                  {g.gameId}
-                </span>
-                <span className="text-xs text-slate-400 font-medium">
-                  {g.currentPlayers} / {g.maxPlayers} Players
-                </span>
+
+          {activeGameId === 'LUCKY_WHEEL' && (
+            <div className="flex flex-col items-center justify-center space-y-6 py-4">
+              <div className="relative w-64 h-64 rounded-full border-8 border-amber-500/40 shadow-2xl flex items-center justify-center overflow-hidden bg-slate-950">
+                <div
+                  className="absolute inset-0 rounded-full transition-transform duration-3000 ease-out flex items-center justify-center"
+                  style={{ transform: `rotate(${wheelRotation}deg)` }}
+                >
+                  <div className="w-full h-full rounded-full bg-gradient-to-tr from-purple-900 via-indigo-950 to-slate-950 flex items-center justify-center">
+                    <span className="text-2xl font-black text-amber-300 tracking-widest">
+                      0x • 1.5x • 2x • 5x • 10x • 50x
+                    </span>
+                  </div>
+                </div>
+                <div className="absolute top-2 w-6 h-8 bg-amber-400 text-slate-950 flex items-center justify-center font-black text-xs z-10 rounded-b-md shadow">
+                  ▼
+                </div>
               </div>
-              <h4 className="font-extrabold text-sm text-slate-100">{g.gameName}</h4>
-              <div className="flex items-center justify-between text-xs text-slate-400 pt-2 border-t border-slate-800">
-                <span>Host: {g.hostName}</span>
-                <span className="font-bold text-amber-400">Min {g.minWagerPoints} Pts</span>
+              <p className="text-xs font-extrabold text-amber-300 bg-slate-950 px-6 py-2 rounded-xl border border-amber-500/30">
+                {wheelResultMsg}
+              </p>
+              <button
+                onClick={handleSpinWheel}
+                disabled={isWheelSpinning}
+                className="px-8 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-black text-xs rounded-2xl shadow flex items-center gap-2"
+              >
+                <RotateCw className={`w-4 h-4 ${isWheelSpinning ? 'animate-spin' : ''}`} />
+                {isWheelSpinning ? 'Spinning...' : `Spin Wheel (-${wheelWager} Pts)`}
+              </button>
+            </div>
+          )}
+
+          {activeGameId === 'TRIVIA_QUIZ' && (
+            <div className="max-w-2xl mx-auto space-y-4">
+              {quizLoading ? (
+                <div className="p-6 text-center text-slate-400 text-xs animate-pulse">
+                  Generating AI Trivia question...
+                </div>
+              ) : quizQuestion ? (
+                <div className="space-y-4">
+                  <div className="p-4 bg-slate-950 rounded-2xl border border-purple-500/30 space-y-1">
+                    <span className="text-[10px] font-black uppercase text-purple-400">AI Live Question</span>
+                    <h4 className="text-sm font-black text-white">{quizQuestion.question}</h4>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {quizQuestion.options.map((opt, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          setSelectedAnswer(idx);
+                          if (idx === quizQuestion.correctIndex) {
+                            setQuizResult(`CORRECT! Won +${quizQuestion.rewardPoints} Points!`);
+                            updateGamePoints(quizQuestion.rewardPoints, 'Trivia win', 'AI Trivia');
+                          } else {
+                            setQuizResult(`INCORRECT! Answer: ${quizQuestion.options[quizQuestion.correctIndex]}`);
+                          }
+                        }}
+                        disabled={selectedAnswer !== null}
+                        className={`p-3 rounded-xl border text-left font-bold text-xs ${
+                          selectedAnswer === null
+                            ? 'bg-slate-950 border-slate-800 hover:border-purple-500 text-slate-200'
+                            : idx === quizQuestion.correctIndex
+                            ? 'bg-emerald-950 border-emerald-500 text-emerald-200'
+                            : selectedAnswer === idx
+                            ? 'bg-red-950 border-red-500 text-red-200'
+                            : 'bg-slate-950/50 border-slate-900 text-slate-500'
+                        }`}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                  {quizResult && <p className="text-center font-bold text-xs text-amber-300">{quizResult}</p>}
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          {activeGameId === 'COIN_FLIP' && (
+            <div className="max-w-md mx-auto text-center space-y-4 py-4">
+              <h4 className="text-sm font-black text-slate-100">Pick Heads or Tails</h4>
+              <div className="flex justify-center gap-4">
+                <button
+                  onClick={() => setCoinPick('HEADS')}
+                  className={`px-6 py-3 rounded-2xl font-black text-xs border ${
+                    coinPick === 'HEADS' ? 'bg-purple-600 text-white border-purple-400' : 'bg-slate-950 text-slate-400 border-slate-800'
+                  }`}
+                >
+                  🪙 HEADS
+                </button>
+                <button
+                  onClick={() => setCoinPick('TAILS')}
+                  className={`px-6 py-3 rounded-2xl font-black text-xs border ${
+                    coinPick === 'TAILS' ? 'bg-purple-600 text-white border-purple-400' : 'bg-slate-950 text-slate-400 border-slate-800'
+                  }`}
+                >
+                  🪙 TAILS
+                </button>
+              </div>
+              {coinResult && <p className="text-xs font-bold text-amber-300">{coinResult}</p>}
+              <button
+                onClick={handleFlipCoin}
+                disabled={isFlipping}
+                className="px-8 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-2xl shadow uppercase"
+              >
+                {isFlipping ? 'Flipping...' : 'Flip 3D Coin (-500 Pts)'}
+              </button>
+            </div>
+          )}
+
+          {activeGameId === 'TRUTH_OR_DARE' && (
+            <div className="max-w-md mx-auto text-center space-y-4 py-4">
+              <div className="flex justify-center gap-2">
+                <button
+                  onClick={() => setTodType('TRUTH')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold ${
+                    todType === 'TRUTH' ? 'bg-pink-600 text-white' : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  Truth
+                </button>
+                <button
+                  onClick={() => setTodType('DARE')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold ${
+                    todType === 'DARE' ? 'bg-purple-600 text-white' : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  Dare
+                </button>
+              </div>
+              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 text-xs font-bold text-amber-300">
+                {todPrompt}
+              </div>
+              <button
+                onClick={handleSpinTruthOrDare}
+                className="px-6 py-2.5 bg-purple-600 text-white font-bold text-xs rounded-xl shadow"
+              >
+                Spin Prompt Wheel
+              </button>
+            </div>
+          )}
+
+          {/* UNO COLOR BLITZ */}
+          {activeGameId === 'UNO' && (
+            <div className="max-w-xl mx-auto space-y-6 text-center py-2">
+              <div className="p-4 bg-slate-950 rounded-2xl border border-amber-500/30 flex items-center justify-around">
+                <div>
+                  <span className="text-[10px] text-slate-400 block uppercase font-bold">Top Card</span>
+                  <div className={`mt-1 px-5 py-3 rounded-2xl text-white font-black text-lg shadow-lg ${
+                    unoTopCard.color === 'red' ? 'bg-red-600' :
+                    unoTopCard.color === 'blue' ? 'bg-blue-600' :
+                    unoTopCard.color === 'green' ? 'bg-emerald-600' : 'bg-amber-500 text-slate-950'
+                  }`}>
+                    {unoTopCard.val}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400 block uppercase font-bold">Status</span>
+                  <p className="text-xs font-extrabold text-amber-300 mt-1">{unoMessage}</p>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-xs font-extrabold text-slate-300 block mb-2">Your Hand ({unoPlayerHand.length} Cards)</span>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  {unoPlayerHand.map((card, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setUnoTopCard(card);
+                        const nextHand = unoPlayerHand.filter((_, idx) => idx !== i);
+                        setUnoPlayerHand(nextHand);
+                        if (nextHand.length === 0) {
+                          updateGamePoints(800, 'UNO Victory!', 'Uno Color Blitz');
+                          setUnoMessage('🎉 UNO VICTORY! Cleared all cards and won +800 Points!');
+                        } else {
+                          setUnoMessage(`Played ${card.color.toUpperCase()} ${card.val}!`);
+                        }
+                      }}
+                      className={`px-4 py-3 rounded-2xl font-black text-sm shadow-md transition-all transform hover:-translate-y-1 ${
+                        card.color === 'red' ? 'bg-red-600 text-white' :
+                        card.color === 'blue' ? 'bg-blue-600 text-white' :
+                        card.color === 'green' ? 'bg-emerald-600 text-white' : 'bg-amber-500 text-slate-950'
+                      }`}
+                    >
+                      {card.val}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={() => {
+                    const colors = ['red', 'blue', 'green', 'yellow'];
+                    const vals = ['1', '3', '7', '+2', 'Reverse', 'Wild'];
+                    const newCard = {
+                      color: colors[Math.floor(Math.random() * colors.length)],
+                      val: vals[Math.floor(Math.random() * vals.length)]
+                    };
+                    setUnoPlayerHand(prev => [...prev, newCard]);
+                    setUnoMessage(`Drew a card (${newCard.color.toUpperCase()} ${newCard.val})`);
+                  }}
+                  className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl"
+                >
+                  Draw Card
+                </button>
+                <button
+                  onClick={() => {
+                    setUnoPlayerHand([
+                      { color: 'red', val: '7' },
+                      { color: 'blue', val: 'Wild' },
+                      { color: 'green', val: '4' },
+                      { color: 'yellow', val: '+2' }
+                    ]);
+                    setUnoMessage('Match color or number!');
+                  }}
+                  className="px-5 py-2.5 bg-slate-950 border border-slate-800 text-slate-400 font-bold text-xs rounded-xl"
+                >
+                  New Round
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TIC TAC TOE */}
+          {(activeGameId === 'TIC_TAC_TOE' || activeGameId === 'TIC_TAC_TOE_SHOWDOWN') && (
+            <div className="max-w-md mx-auto space-y-4 text-center py-2">
+              <p className="text-xs font-extrabold text-amber-300">{tttMessage}</p>
+              <div className="grid grid-cols-3 gap-3 w-64 h-64 mx-auto p-3 bg-slate-950 rounded-2xl border border-slate-800">
+                {tttGrid.map((cell, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      if (cell || tttMessage.includes('WON') || tttMessage.includes('DRAW')) return;
+                      const nextGrid = [...tttGrid];
+                      nextGrid[idx] = 'X';
+                      setTttGrid(nextGrid);
+
+                      // Check Win
+                      const wins = [
+                        [0,1,2], [3,4,5], [6,7,8],
+                        [0,3,6], [1,4,7], [2,5,8],
+                        [0,4,8], [2,4,6]
+                      ];
+                      const isPlayerWin = wins.some(combo => combo.every(i => nextGrid[i] === 'X'));
+
+                      if (isPlayerWin) {
+                        setTttMessage('🎉 YOU WON! Claimed +600 Wager Points!');
+                        updateGamePoints(tttWager * 2, 'Tic-Tac-Toe Win', 'Tic-Tac-Toe');
+                        return;
+                      }
+
+                      // AI move
+                      const emptyIndices = nextGrid.map((v, i) => v === null ? i : null).filter(v => v !== null) as number[];
+                      if (emptyIndices.length === 0) {
+                        setTttMessage('🤝 Match DRAW! Wagers returned.');
+                        return;
+                      }
+
+                      const aiChoice = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+                      nextGrid[aiChoice] = 'O';
+                      setTttGrid(nextGrid);
+
+                      const isAiWin = wins.some(combo => combo.every(i => nextGrid[i] === 'O'));
+                      if (isAiWin) {
+                        setTttMessage('💔 Opponent (O) Won! Try another match.');
+                      } else {
+                        setTttMessage('Your turn (X)!');
+                      }
+                    }}
+                    className={`w-full h-full bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-center text-2xl font-black transition-all ${
+                      cell === 'X' ? 'text-purple-400' : cell === 'O' ? 'text-pink-400' : 'hover:bg-slate-800'
+                    }`}
+                  >
+                    {cell}
+                  </button>
+                ))}
               </div>
               <button
                 onClick={() => {
-                  setActiveGameTab('LUDO');
-                  alert(`Joined ${g.gameName}! Match ready.`);
+                  setTttGrid(Array(9).fill(null));
+                  setTttMessage('Your turn (X)! Tap a cell to play.');
                 }}
-                className="w-full py-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-extrabold text-xs rounded-xl hover:opacity-90 transition-all"
+                className="px-6 py-2 bg-purple-600 text-white font-bold text-xs rounded-xl"
               >
-                Join Room
+                Reset Match
+              </button>
+            </div>
+          )}
+
+          {/* CONNECT FOUR */}
+          {activeGameId === 'CONNECT_FOUR' && (
+            <div className="max-w-lg mx-auto space-y-4 text-center py-2">
+              <p className="text-xs font-extrabold text-amber-300">{c4Message}</p>
+              <div className="bg-slate-950 p-4 rounded-3xl border border-slate-800 space-y-2">
+                <div className="grid grid-cols-7 gap-2">
+                  {[0, 1, 2, 3, 4, 5, 6].map(colIdx => (
+                    <button
+                      key={colIdx}
+                      onClick={() => {
+                        const newGrid = c4Grid.map(row => [...row]);
+                        let placedRow = -1;
+                        for (let r = 5; r >= 0; r--) {
+                          if (newGrid[r][colIdx] === 0) {
+                            newGrid[r][colIdx] = c4Turn;
+                            placedRow = r;
+                            break;
+                          }
+                        }
+                        if (placedRow !== -1) {
+                          setC4Grid(newGrid);
+                          setC4Turn(c4Turn === 1 ? 2 : 1);
+                          setC4Message(`Disc dropped in column ${colIdx + 1}! Player ${c4Turn === 1 ? 2 : 1}'s turn.`);
+                        }
+                      }}
+                      className="py-1 bg-purple-950/60 hover:bg-purple-800 text-purple-200 text-[10px] font-black rounded-lg"
+                    >
+                      ↓
+                    </button>
+                  ))}
+                </div>
+                {c4Grid.map((row, rIdx) => (
+                  <div key={rIdx} className="grid grid-cols-7 gap-2">
+                    {row.map((val, cIdx) => (
+                      <div
+                        key={cIdx}
+                        className={`aspect-square rounded-full border border-slate-800 flex items-center justify-center transition-all ${
+                          val === 1 ? 'bg-red-500 shadow-md animate-bounce' :
+                          val === 2 ? 'bg-yellow-400 shadow-md' : 'bg-slate-900'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => {
+                  setC4Grid(Array(6).fill(null).map(() => Array(7).fill(0)));
+                  setC4Turn(1);
+                  setC4Message('Player 1 (Red) turn! Tap a column to drop a disc.');
+                }}
+                className="px-5 py-2 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl"
+              >
+                Reset Grid
+              </button>
+            </div>
+          )}
+
+          {/* CHESS / CHECKERS */}
+          {(activeGameId === 'CHESS' || activeGameId === 'CHECKERS') && (
+            <div className="max-w-md mx-auto space-y-4 text-center py-2">
+              <p className="text-xs font-extrabold text-amber-300">{chessMessage}</p>
+              <div className="grid grid-cols-8 gap-0.5 border-4 border-slate-800 rounded-xl overflow-hidden bg-slate-950 p-1">
+                {chessBoard.map((row, r) =>
+                  row.map((piece, c) => {
+                    const isDark = (r + c) % 2 === 1;
+                    const isSelected = chessSelected && chessSelected[0] === r && chessSelected[1] === c;
+                    return (
+                      <button
+                        key={`${r}-${c}`}
+                        onClick={() => {
+                          if (!chessSelected) {
+                            if (piece !== '') setChessSelected([r, c]);
+                          } else {
+                            const [sr, sc] = chessSelected;
+                            const newBoard = chessBoard.map(rowArr => [...rowArr]);
+                            const movedPiece = newBoard[sr][sc];
+                            newBoard[r][c] = movedPiece;
+                            newBoard[sr][sc] = '';
+                            setChessBoard(newBoard);
+                            setChessSelected(null);
+                            setChessMessage(`Moved piece from (${sr+1},${sc+1}) to (${r+1},${c+1})!`);
+                          }
+                        }}
+                        className={`aspect-square flex items-center justify-center text-xl font-black transition-all ${
+                          isSelected ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-300' :
+                          isDark ? 'bg-slate-900 text-purple-200' : 'bg-slate-800 text-slate-100'
+                        }`}
+                      >
+                        {piece}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* SLOTS PARADISE */}
+          {activeGameId === 'SLOTS_PARADISE' && (
+            <div className="max-w-md mx-auto text-center space-y-4 py-4">
+              <div className="bg-slate-950 border-4 border-amber-500/50 rounded-3xl p-6 shadow-2xl space-y-4">
+                <span className="text-xs font-black text-amber-400 uppercase tracking-widest block">
+                  🎰 NEXORA CASINO SLOTS 🎰
+                </span>
+                <div className="flex justify-center gap-3">
+                  {slotsReels.map((symbol, idx) => (
+                    <div
+                      key={idx}
+                      className={`w-20 h-24 bg-slate-900 border-2 border-amber-500/40 rounded-2xl flex items-center justify-center text-4xl shadow-inner ${
+                        isSlotsSpinning ? 'animate-spin' : ''
+                      }`}
+                    >
+                      {symbol}
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs font-bold text-amber-300">{slotsMessage}</p>
+                <button
+                  onClick={() => {
+                    if (wallet.points < slotsWager) {
+                      alert(`Insufficient points! You need ${slotsWager} Points to spin.`);
+                      return;
+                    }
+                    setIsSlotsSpinning(true);
+                    setSlotsMessage('Spinning reels...');
+                    updateGamePoints(-slotsWager, 'Slot Wager', 'Slots Paradise');
+
+                    const symbols = ['7️⃣', '💎', '🍇', '🔔', '🍒', '🪙'];
+                    setTimeout(() => {
+                      setIsSlotsSpinning(false);
+                      const r1 = symbols[Math.floor(Math.random() * symbols.length)];
+                      const r2 = symbols[Math.floor(Math.random() * symbols.length)];
+                      const r3 = symbols[Math.floor(Math.random() * symbols.length)];
+                      setSlotsReels([r1, r2, r3]);
+
+                      if (r1 === r2 && r2 === r3) {
+                        const win = 5000;
+                        updateGamePoints(win, 'JACKPOT WIN 3-MATCH!', 'Slots Paradise');
+                        setSlotsMessage(`🎉 TRIPLE MATCH JACKPOT! Won +${win.toLocaleString()} Points!`);
+                      } else if (r1 === r2 || r2 === r3 || r1 === r3) {
+                        const win = 300;
+                        updateGamePoints(win, '2-Match Win', 'Slots Paradise');
+                        setSlotsMessage(`✨ Double match! Won +${win} Points.`);
+                      } else {
+                        setSlotsMessage('No match this spin. Try again!');
+                      }
+                    }, 1200);
+                  }}
+                  disabled={isSlotsSpinning}
+                  className="px-8 py-3 bg-gradient-to-r from-amber-500 to-yellow-500 text-slate-950 font-black text-xs rounded-2xl shadow uppercase"
+                >
+                  {isSlotsSpinning ? 'Spinning...' : `Spin Reels (-${slotsWager} Pts)`}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* MYSTERY LUCKY BOX */}
+          {activeGameId === 'LUCKY_BOX' && (
+            <div className="max-w-lg mx-auto text-center space-y-4 py-4">
+              <p className="text-xs font-extrabold text-amber-300">{boxMessage}</p>
+              <div className="grid grid-cols-3 gap-4">
+                {[0, 1, 2].map(idx => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      if (boxesOpened[idx]) return;
+                      const prizes = [500, 1500, 0];
+                      const prize = prizes[Math.floor(Math.random() * prizes.length)];
+                      const nextOpened = [...boxesOpened];
+                      nextOpened[idx] = true;
+                      setBoxesOpened(nextOpened);
+
+                      const nextPrizes = [...boxPrizes];
+                      nextPrizes[idx] = prize;
+                      setBoxPrizes(nextPrizes);
+
+                      if (prize > 0) {
+                        updateGamePoints(prize, 'Opened Mystery Box', 'Lucky Box');
+                        setBoxMessage(`🎉 Box #${idx+1} contained +${prize} Points!`);
+                      } else {
+                        setBoxMessage(`💔 Box #${idx+1} was empty! Try another box.`);
+                      }
+                    }}
+                    className={`h-32 rounded-3xl border-2 flex flex-col items-center justify-center p-3 transition-all ${
+                      boxesOpened[idx]
+                        ? 'bg-slate-950 border-purple-500/50 text-purple-300'
+                        : 'bg-gradient-to-br from-purple-900 to-indigo-950 border-amber-500/40 hover:scale-105'
+                    }`}
+                  >
+                    <Gift className={`w-8 h-8 ${boxesOpened[idx] ? 'text-slate-500' : 'text-amber-400 animate-bounce'}`} />
+                    <span className="text-xs font-black mt-2">
+                      {boxesOpened[idx] ? `+${boxPrizes[idx]} Pts` : `Box #${idx+1}`}
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => {
+                  setBoxesOpened([false, false, false]);
+                  setBoxPrizes([0, 0, 0]);
+                  setBoxMessage('Pick a Mystery Box to open your reward!');
+                }}
+                className="px-5 py-2 bg-slate-800 text-slate-300 font-bold text-xs rounded-xl"
+              >
+                Reset Boxes
+              </button>
+            </div>
+          )}
+
+          {/* SPIN THE BOTTLE */}
+          {activeGameId === 'SPIN_BOTTLE' && (
+            <div className="max-w-md mx-auto text-center space-y-4 py-4">
+              <div className="relative w-56 h-56 mx-auto rounded-full border-4 border-slate-800 bg-slate-950 flex items-center justify-center">
+                <div
+                  className="w-8 h-28 bg-gradient-to-t from-pink-500 to-purple-500 rounded-full transition-all duration-3000 ease-out shadow-lg"
+                  style={{ transform: `rotate(${bottleRotation}deg)` }}
+                />
+                <span className="absolute text-[10px] font-black text-slate-400 top-2">Seat #1</span>
+                <span className="absolute text-[10px] font-black text-slate-400 right-2">Seat #3</span>
+                <span className="absolute text-[10px] font-black text-slate-400 bottom-2">Seat #5</span>
+                <span className="absolute text-[10px] font-black text-slate-400 left-2">Seat #7</span>
+              </div>
+              <p className="text-xs font-bold text-amber-300">
+                {bottleLandedSeat ? `🎉 Bottle pointed to Mic Seat #${bottleLandedSeat}!` : 'Tap Spin Bottle to choose live guest!'}
+              </p>
+              <button
+                onClick={() => {
+                  setIsBottleSpinning(true);
+                  const seat = Math.floor(Math.random() * 8) + 1;
+                  const newRot = bottleRotation + 1440 + (seat * 45);
+                  setBottleRotation(newRot);
+                  setTimeout(() => {
+                    setIsBottleSpinning(false);
+                    setBottleLandedSeat(seat);
+                  }, 3000);
+                }}
+                disabled={isBottleSpinning}
+                className="px-6 py-2.5 bg-pink-600 hover:bg-pink-700 text-white font-black text-xs rounded-xl shadow"
+              >
+                {isBottleSpinning ? 'Spinning...' : 'Spin Bottle'}
+              </button>
+            </div>
+          )}
+
+          {/* LIVE STREAM PK BATTLES */}
+          {(activeGameId === 'PK_GIFT_WAR' || activeGameId === 'MIC_PK_CHALLENGE' || activeGameId === 'SINGING_BATTLE' || activeGameId === 'HEADS_UP_PK') && (
+            <div className="max-w-xl mx-auto space-y-4 py-2 text-center">
+              <div className="p-4 bg-slate-950 rounded-3xl border border-slate-800 space-y-3">
+                <div className="flex justify-between items-center text-xs font-black">
+                  <span className="text-purple-400">🔥 STREAMER TEAM A ({pkScoreHost1} PTS)</span>
+                  <span className="text-pink-400">STREAMER TEAM B ({pkScoreHost2} PTS) ⚡</span>
+                </div>
+                <div className="w-full h-4 bg-slate-900 rounded-full overflow-hidden flex border border-slate-800">
+                  <div className="h-full bg-purple-600 transition-all duration-300" style={{ width: `${(pkScoreHost1 / (pkScoreHost1 + pkScoreHost2)) * 100}%` }} />
+                  <div className="h-full bg-pink-600 transition-all duration-300" style={{ width: `${(pkScoreHost2 / (pkScoreHost1 + pkScoreHost2)) * 100}%` }} />
+                </div>
+                <p className="text-xs font-extrabold text-amber-300">{pkMessage}</p>
+              </div>
+
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={() => {
+                    setPkScoreHost1(prev => prev + 25);
+                    setPkMessage('Boosted Team A with +25 PK Points!');
+                    updateGamePoints(50, 'PK Gift boost', 'PK Duel');
+                  }}
+                  className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-black text-xs rounded-xl shadow"
+                >
+                  Send Gift to Team A (+25 Pts)
+                </button>
+                <button
+                  onClick={() => {
+                    setPkScoreHost2(prev => prev + 25);
+                    setPkMessage('Boosted Team B with +25 PK Points!');
+                  }}
+                  className="px-5 py-2.5 bg-pink-600 hover:bg-pink-700 text-white font-black text-xs rounded-xl shadow"
+                >
+                  Send Gift to Team B (+25 Pts)
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* FAMILY GUILD BOSS RAID */}
+          {(activeGameId === 'FAMILY_TREE_QUEST' || activeGameId === 'FAMILY_FEUD') && (
+            <div className="max-w-xl mx-auto space-y-4 py-2 text-center">
+              <div className="p-4 bg-slate-950 rounded-3xl border border-purple-500/40 space-y-3">
+                <div className="flex justify-between items-center text-xs font-black">
+                  <span className="text-slate-300">🐉 FAMILY RAID BOSS</span>
+                  <span className="text-red-400">{bossHp} / 1000 HP</span>
+                </div>
+                <div className="w-full h-4 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                  <div className="h-full bg-gradient-to-r from-red-500 to-amber-400 transition-all duration-300" style={{ width: `${(bossHp / 1000) * 100}%` }} />
+                </div>
+                <p className="text-xs font-extrabold text-amber-300">{bossMessage}</p>
+              </div>
+
+              <div className="flex items-center justify-center gap-3">
+                <button
+                  onClick={() => {
+                    if (bossHp <= 0) return;
+                    const dmg = Math.floor(Math.random() * 80) + 40;
+                    const newHp = Math.max(0, bossHp - dmg);
+                    setBossHp(newHp);
+                    setBossCombo(prev => prev + 1);
+
+                    if (newHp === 0) {
+                      updateGamePoints(1500, 'Guild Boss Slain!', 'Family Boss Raid');
+                      setBossMessage('🎉 BOSS DEFEATED! Shared +1,500 Guild Coins with team!');
+                    } else {
+                      setBossMessage(`Dealt ${dmg} damage to Raid Boss! (${bossCombo + 1}x Combo)`);
+                    }
+                  }}
+                  disabled={bossHp === 0}
+                  className="px-6 py-3 bg-gradient-to-r from-red-600 to-amber-600 text-white font-black text-xs rounded-2xl shadow"
+                >
+                  ⚔️ Guild Strike Attack
+                </button>
+                <button
+                  onClick={() => {
+                    setBossHp(1000);
+                    setBossCombo(0);
+                    setBossMessage('Raid Boss spawned! Tap Guild Strike to deal damage.');
+                  }}
+                  className="px-4 py-3 bg-slate-800 text-slate-300 font-bold text-xs rounded-2xl"
+                >
+                  Respawn Boss
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* GENERIC GAME MODULE ARENA FALLBACK (For any other game ID) */}
+          {activeGameId !== 'LUDO' &&
+           activeGameId !== 'UNO' &&
+           activeGameId !== 'TIC_TAC_TOE' &&
+           activeGameId !== 'TIC_TAC_TOE_SHOWDOWN' &&
+           activeGameId !== 'CONNECT_FOUR' &&
+           activeGameId !== 'CHESS' &&
+           activeGameId !== 'CHECKERS' &&
+           activeGameId !== 'SLOTS_PARADISE' &&
+           activeGameId !== 'LUCKY_BOX' &&
+           activeGameId !== 'SPIN_BOTTLE' &&
+           activeGameId !== 'TRUTH_OR_DARE' &&
+           activeGameId !== 'TRIVIA_QUIZ' &&
+           activeGameId !== 'LUCKY_WHEEL' &&
+           activeGameId !== 'COIN_FLIP' &&
+           activeGameId !== 'PK_GIFT_WAR' &&
+           activeGameId !== 'MIC_PK_CHALLENGE' &&
+           activeGameId !== 'SINGING_BATTLE' &&
+           activeGameId !== 'HEADS_UP_PK' &&
+           activeGameId !== 'FAMILY_TREE_QUEST' &&
+           activeGameId !== 'FAMILY_FEUD' && (
+            <div className="max-w-xl mx-auto space-y-4 py-2">
+              <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-3">
+                <div className="flex justify-between items-center text-xs font-bold text-slate-400">
+                  <span>Module: {gameEngine.getModule(activeGameId)?.definition.name || activeGameId}</span>
+                  <span className="text-emerald-400 font-mono">Status: IN_MATCH</span>
+                </div>
+                <p className="text-xs text-slate-300">
+                  {gameEngine.getModule(activeGameId)?.definition.description || 'Interactive multiplayer game module.'}
+                </p>
+                <div className="p-3 bg-slate-900 rounded-xl text-xs font-mono text-amber-300 space-y-1">
+                  {genericLogs.slice(-3).map((log, i) => (
+                    <div key={i}>● {log}</div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={genericMoveText}
+                  onChange={(e) => setGenericMoveText(e.target.value)}
+                  placeholder="Enter strategic turn action..."
+                  className="flex-1 px-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white"
+                />
+                <button
+                  onClick={() => {
+                    const moveMsg = `Turn move executed: ${genericMoveText}`;
+                    setGenericLogs(prev => [...prev, moveMsg]);
+                    updateGamePoints(150, 'Turn action completed', activeGameId);
+                  }}
+                  className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-black text-xs rounded-xl shadow"
+                >
+                  Play Move (+150 Pts)
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 4. MAIN CATEGORY VIEW DISPATCHER */}
+
+      {/* VIEW A: TRENDING / CASUAL / PARTY / COIN / HOST / PK / FAMILY MODULES GRID */}
+      {hubTab !== 'TOURNAMENTS' && hubTab !== 'MISSIONS' && hubTab !== 'LOBBY' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredDefinitions.length === 0 ? (
+            <div className="col-span-full bg-slate-900 border border-slate-800 rounded-3xl p-10 text-center space-y-3">
+              <Gamepad2 className="w-10 h-10 text-purple-400 mx-auto opacity-50" />
+              <h3 className="text-base font-extrabold text-slate-200">No Games Found</h3>
+              <p className="text-xs text-slate-400">Try adjusting your search query or selecting another game category tab.</p>
+            </div>
+          ) : (
+            filteredDefinitions.map(game => (
+              <div
+                key={game.id}
+                className="bg-slate-900 border border-slate-800 hover:border-purple-500/50 rounded-3xl p-5 space-y-4 transition-all shadow-xl flex flex-col justify-between"
+              >
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="px-3 py-1 bg-purple-950 text-purple-300 border border-purple-800 text-[10px] font-black uppercase rounded-full">
+                      {game.category}
+                    </span>
+                    {game.isPopular && (
+                      <span className="px-2.5 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-bold rounded-full flex items-center gap-1">
+                        🔥 Popular
+                      </span>
+                    )}
+                  </div>
+
+                  <h3 className="text-base font-black text-slate-100 flex items-center gap-2">
+                    <Gamepad2 className="w-4 h-4 text-purple-400" /> {game.name}
+                  </h3>
+
+                  <p className="text-xs text-slate-400 line-clamp-2">{game.description}</p>
+                </div>
+
+                <div className="space-y-3 pt-2 border-t border-slate-800">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
+                    <span>Players: {game.minPlayers}-{game.maxPlayers}</span>
+                    <span className="text-amber-400 font-bold">{game.wagerAllowed ? '🎯 Wager Allowed' : '🎉 Free Party'}</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setActiveGameId(game.id)}
+                      className="flex-1 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:opacity-90 text-white font-black text-xs rounded-2xl shadow flex items-center justify-center gap-1.5"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-white" /> Quick Play
+                    </button>
+                    <button
+                      onClick={() => alert(`Rules for ${game.name}:\n\n${game.howToPlay}`)}
+                      className="p-2.5 bg-slate-950 hover:bg-slate-800 text-slate-300 rounded-2xl border border-slate-800"
+                      title="How to Play"
+                    >
+                      <HelpCircle className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* VIEW B: TOURNAMENTS */}
+      {hubTab === 'TOURNAMENTS' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {tournaments.map(t => (
+              <div key={t.id} className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-xl space-y-4">
+                <div className="relative h-36 bg-slate-950">
+                  <img src={t.bannerImage} alt={t.title} className="w-full h-full object-cover opacity-80" />
+                  <div className="absolute top-3 left-3 px-3 py-1 bg-red-600 text-white font-black text-[10px] rounded-full animate-pulse">
+                    {t.status}
+                  </div>
+                </div>
+
+                <div className="p-4 space-y-3">
+                  <h3 className="text-sm font-black text-white">{t.title}</h3>
+                  <div className="flex justify-between text-xs font-bold text-slate-300">
+                    <span className="text-amber-300">Prize: 🪙 {t.prizePoolCoins.toLocaleString()} Coins</span>
+                    <span className="text-purple-300">Fee: {t.entryFeePoints} Pts</span>
+                  </div>
+
+                  <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-purple-500 to-pink-500"
+                      style={{ width: `${(t.registeredCount / t.maxParticipants) * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-[10px] text-slate-400 block text-right">
+                    {t.registeredCount} / {t.maxParticipants} Registered
+                  </span>
+
+                  <button
+                    onClick={async () => {
+                      if (wallet.points < t.entryFeePoints) {
+                        alert(`Insufficient points! Entry fee is ${t.entryFeePoints} Points.`);
+                        return;
+                      }
+                      const userId = authUser?.uid || 'user_guest';
+                      const ok = await tournamentService.registerUser(t.id, userId, t.entryFeePoints);
+                      if (ok) alert(`Successfully registered for ${t.title}! Tournament starts ${t.startTime}`);
+                    }}
+                    className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-black text-xs rounded-2xl shadow"
+                  >
+                    Register Tournament
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* VIEW C: DAILY MISSIONS */}
+      {hubTab === 'MISSIONS' && (
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-6 shadow-xl max-w-4xl mx-auto">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+            <div>
+              <h3 className="text-lg font-black text-slate-100 flex items-center gap-2">
+                <Trophy className="w-5 h-5 text-amber-400" /> Daily Gaming Missions & Streak Rewards
+              </h3>
+              <p className="text-xs text-slate-400">Complete tasks every 24 hours to earn bonus Points, Coins, and XP.</p>
+            </div>
+            <span className="px-3 py-1 bg-purple-950 text-purple-300 border border-purple-800 text-xs font-bold rounded-full">
+              Resets in 14h 22m
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            {missions.map(m => (
+              <div key={m.id} className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-purple-950 border border-purple-800 text-purple-300 flex items-center justify-center shrink-0">
+                    <Trophy className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-100">{m.title}</h4>
+                    <p className="text-[11px] text-slate-400">{m.description}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <div className="w-24 h-2 bg-slate-900 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-purple-500 to-emerald-400"
+                          style={{ width: `${Math.min(100, (m.currentCount / m.targetCount) * 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-mono">{m.currentCount}/{m.targetCount}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-black text-amber-300">
+                    +{m.rewardAmount} {m.rewardType}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      const userId = authUser?.uid || 'user_guest';
+                      const res = await dailyMissionsService.claimReward(m.id, userId);
+                      alert(res.message);
+                      setMissions([...dailyMissionsService.getMissions()]);
+                    }}
+                    disabled={m.isClaimed || m.currentCount < m.targetCount}
+                    className={`px-4 py-2 rounded-xl font-black text-xs ${
+                      m.isClaimed
+                        ? 'bg-slate-800 text-slate-500'
+                        : m.currentCount >= m.targetCount
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow animate-pulse'
+                        : 'bg-slate-950 border border-slate-800 text-slate-500'
+                    }`}
+                  >
+                    {m.isClaimed ? 'Claimed' : 'Claim'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* VIEW D: PUBLIC LOBBIES */}
+      {hubTab === 'LOBBY' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {gameRooms.length === 0 && (
+            <div className="col-span-full text-center py-14 text-sm text-slate-500">
+              No open public game rooms currently. Create one to start playing with the community!
+            </div>
+          )}
+          {gameRooms.map(r => (
+            <div key={r.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-4 space-y-3">
+              <div className="flex justify-between items-center text-xs">
+                <span className="px-2.5 py-0.5 bg-purple-950 text-purple-300 font-bold rounded-full">{r.gameId}</span>
+                <span className="text-slate-400">{r.currentPlayers}/{r.maxPlayers} Players</span>
+              </div>
+              <h4 className="text-xs font-black text-slate-100">{r.gameName}</h4>
+              <div className="flex justify-between text-xs text-slate-400">
+                <span>Host: {r.hostName}</span>
+                <span className="text-amber-300 font-bold">Min {r.minWagerPoints} Pts</span>
+              </div>
+              <button
+                onClick={() => {
+                  setActiveGameId(r.gameId);
+                  alert(`Joined ${r.gameName}! Match ready.`);
+                }}
+                className="w-full py-2 bg-purple-600 text-white font-bold text-xs rounded-xl"
+              >
+                Join Match Room
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* CREATE ROOM MODAL */}
+      {isCreateRoomOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-purple-500/40 rounded-3xl p-6 max-w-md w-full space-y-4 text-white shadow-2xl">
+            <h3 className="text-base font-black flex items-center gap-2">
+              <PlusCircle className="w-5 h-5 text-purple-400" /> Create Custom Game Match Room
+            </h3>
+
+            <div>
+              <label className="text-xs font-bold text-slate-400 block mb-1">Room Title</label>
+              <input
+                type="text"
+                value={newRoomTitle}
+                onChange={(e) => setNewRoomTitle(e.target.value)}
+                className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-2xl text-xs font-bold text-white"
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-400 block mb-1">Select Game Module</label>
+              <select
+                value={newRoomGameId}
+                onChange={(e) => setNewRoomGameId(e.target.value)}
+                className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-2xl text-xs font-bold text-white"
+              >
+                {allDefinitions.map(d => (
+                  <option key={d.id} value={d.id}>{d.name} ({d.category})</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-400 block mb-1">Min Wager Points</label>
+              <input
+                type="number"
+                value={newRoomWager}
+                onChange={(e) => setNewRoomWager(Number(e.target.value))}
+                className="w-full px-4 py-2.5 bg-slate-950 border border-slate-800 rounded-2xl text-xs font-bold text-white"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                onClick={async () => {
+                  await gamingLobbyService.createRoom({
+                    gameId: newRoomGameId,
+                    gameName: newRoomTitle,
+                    hostName: authUser?.displayName || 'Alex Rivers',
+                    minWagerPoints: newRoomWager,
+                    maxPlayers: 4,
+                    currentPlayers: 1,
+                    isPrivate: false,
+                    status: 'WAITING'
+                  });
+                  setIsCreateRoomOpen(false);
+                  setActiveGameId(newRoomGameId);
+                  alert(`Created room '${newRoomTitle}'! Players can now join.`);
+                }}
+                className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-black text-xs rounded-2xl shadow"
+              >
+                Create Room
+              </button>
+              <button
+                onClick={() => setIsCreateRoomOpen(false)}
+                className="px-4 py-2.5 bg-slate-800 text-slate-300 font-bold text-xs rounded-2xl"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -61,7 +61,7 @@ export const SocialFeedView: React.FC = () => {
       authorLevel: 58,
       authorBadge: 'TOP HOST',
       location: '🇺🇸 Los Angeles',
-      content: 'Who is joining our 9-Seat Party Room tonight? Sending 10x Dragons to the top seat gifter! 🔥✨ #PoppoVibes #NexoraLive @alex_rivers',
+      content: 'Who is joining our 9-Seat Party Room tonight? Sending 10x Dragons to the top seat gifter! 🔥✨ #NexoraVibes #NexoraLive @alex_rivers',
       mediaUrl: 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=800&q=80',
       likesCount: 1420,
       commentsCount: 238,
@@ -489,7 +489,7 @@ export const SocialFeedView: React.FC = () => {
 
             <div className="space-y-2">
               {[
-                { tag: '#PoppoGiftingWar', posts: '128.4K posts' },
+                { tag: '#NexoraGiftingWar', posts: '128.4K posts' },
                 { tag: '#PKBattleChampionship', posts: '94.2K posts' },
                 { tag: '#9SeatPartyRoom', posts: '62.8K posts' },
                 { tag: '#LudoMasterPvP', posts: '41.5K posts' },

@@ -20,7 +20,7 @@ interface GoLiveModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectStreamType: (
-    type: 'VIDEO' | 'PARTY_9SEAT' | 'PK_BATTLE' | 'REEL',
+    type: 'VIDEO' | 'MULTI_GUEST' | 'PODCAST' | 'PARTY_9SEAT' | 'PK_BATTLE' | 'GAMING' | 'REEL',
     details: { title: string; tag: string }
   ) => void;
 }
@@ -74,31 +74,49 @@ export const GoLiveModal: React.FC<GoLiveModalProps> = ({
         </div>
 
         {/* SELECT BROADCAST MODE OPTIONS */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-2.5 max-h-60 overflow-y-auto no-scrollbar pr-1">
           {[
             {
               id: 'VIDEO',
-              title: '📹 Live Video Stream',
-              sub: 'Solo webcam with AI Beauty FX',
-              color: 'from-pink-600 to-purple-600'
+              title: '📹 Solo Live Video',
+              sub: 'Webcam with AI Crystal Beauty',
+              badge: 'POPULAR'
+            },
+            {
+              id: 'MULTI_GUEST',
+              title: '👥 Multi-Guest Live',
+              sub: '4-6 Seat Video/Voice Guest Stage',
+              badge: 'HOT'
+            },
+            {
+              id: 'PODCAST',
+              title: '🎙️ Podcast & Audio Room',
+              sub: 'Voice talk show & DJ studio',
+              badge: 'VOICE'
             },
             {
               id: 'PARTY_9SEAT',
-              title: '🎙️ 9-Seat Party Room',
+              title: '🥳 9-Seat Party Room',
               sub: 'Voice seats, Karaoke & Dating',
-              color: 'from-purple-600 to-indigo-600'
+              badge: '9 SEATS'
             },
             {
               id: 'PK_BATTLE',
               title: '⚔️ Challenge PK Battle',
               sub: '1v1 Gift Battle with Host',
-              color: 'from-amber-500 to-red-600'
+              badge: 'PK'
+            },
+            {
+              id: 'GAMING',
+              title: '🎮 Gaming Live Arena',
+              sub: 'Stream games, Ludo & Esport',
+              badge: 'GAME'
             },
             {
               id: 'REEL',
               title: '🎬 Post Video Reel',
               sub: 'Upload short video highlight',
-              color: 'from-cyan-600 to-blue-600'
+              badge: 'NEW'
             }
           ].map((mode) => (
             <button
@@ -107,9 +125,14 @@ export const GoLiveModal: React.FC<GoLiveModalProps> = ({
                 onSelectStreamType(mode.id as any, { title: streamTitle, tag: selectedTag });
                 onClose();
               }}
-              className={`p-4 bg-slate-950 border border-slate-800 hover:border-pink-500/50 rounded-2xl text-left space-y-1.5 transition-all group hover:scale-[1.02] shadow-md`}
+              className="p-3 bg-slate-950/80 border border-slate-800 hover:border-pink-500/60 rounded-2xl text-left space-y-1 transition-all group hover:scale-[1.02] shadow-md relative"
             >
-              <h4 className="font-black text-xs text-slate-100 group-hover:text-pink-300">{mode.title}</h4>
+              <div className="flex items-center justify-between">
+                <h4 className="font-black text-xs text-slate-100 group-hover:text-pink-300">{mode.title}</h4>
+                <span className="px-1.5 py-0.2 bg-pink-500/20 text-pink-400 border border-pink-500/30 text-[8px] font-black rounded uppercase">
+                  {mode.badge}
+                </span>
+              </div>
               <p className="text-[10px] text-slate-400 leading-tight">{mode.sub}</p>
             </button>
           ))}
