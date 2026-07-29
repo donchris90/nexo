@@ -152,6 +152,18 @@ export const LiveStreamView: React.FC<LiveStreamViewProps> = ({ mode = 'LIVE', o
     if (match) setSelectedStream(match);
   }, [focusStreamId, streams]);
 
+  // If we just landed on our own freshly-created stream via "Go Live", start
+  // broadcasting immediately instead of requiring a second "Live Cam" click.
+  useEffect(() => {
+    if (!focusStreamId || !selectedStream) return;
+    if (selectedStream.id !== focusStreamId) return;
+    const iAmTheHost = !!user && selectedStream.creatorId === user.uid;
+    if (iAmTheHost && !webcamEnabled) {
+      toggleWebcam();
+    }
+  }, [focusStreamId, selectedStream?.id]);
+
+
   // Video Selector Modal State
   const [showVideoModal, setShowVideoModal] = useState(false);
   const [videoModalTab, setVideoModalTab] = useState<'LIBRARY' | 'UPLOAD' | 'LAYOUT' | 'PLAYLISTS'>('LIBRARY');
