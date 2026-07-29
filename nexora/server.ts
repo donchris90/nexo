@@ -6,6 +6,8 @@ import dotenv from 'dotenv';
 import pkg from 'agora-token';
 import Stripe from 'stripe';
 import cors from 'cors';
+import { initializeApp, applicationDefault, cert, getApps, App as FirebaseAdminApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 
 const { RtcTokenBuilder, RtcRole } = pkg;
 
@@ -30,6 +32,57 @@ async function startServer() {
       stripeClient = new Stripe(key);
     }
     return stripeClient;
+  };
+
+  // Lazy Firebase Admin Initialization (used to verify caller identity on
+  // financially-sensitive endpoints — see `requireAuth` below). Supports either a
+  // service-account JSON file path (GOOGLE_APPLICATION_CREDENTIALS) or an inline
+  // JSON credential string (FIREBASE_SERVICE_ACCOUNT_KEY), whichever is available.
+  let firebaseAdminApp: FirebaseAdminApp | null = null;
+  const getFirebaseAdminApp = (): FirebaseAdminApp | null => {
+    if (firebaseAdminApp) return firebaseAdminApp;
+    if (getApps().length > 0) {
+      firebaseAdminApp = getApps()[0]!;
+      return firebaseAdminApp;
+    }
+    try {
+      const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+      if (serviceAccountJson) {
+        firebaseAdminApp = initializeApp({ credential: cert(JSON.parse(serviceAccountJson)) });
+      } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+        firebaseAdminApp = initializeApp({ credential: applicationDefault() });
+      } else {
+        return null;
+      }
+      return firebaseAdminApp;
+    } catch (err) {
+      console.error('[Firebase Admin] Initialization failed:', err);
+      return null;
+    }
+  };
+
+  /**
+   * Verifies the `Authorization: Bearer <Firebase ID token>` header and attaches the
+   * verified uid to `req.uid`. Fails closed: if Admin credentials aren't configured,
+   * requests are rejected rather than silently allowed through unauthenticated.
+   */
+  const requireAuth = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const adminApp = getFirebaseAdminApp();
+    if (!adminApp) {
+      return res.status(503).json({ error: 'Authentication is not configured on this server.' });
+    }
+    const authHeader = req.headers.authorization || '';
+    const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    if (!idToken) {
+      return res.status(401).json({ error: 'Missing Authorization: Bearer <token> header.' });
+    }
+    try {
+      const decoded = await getAuth(adminApp).verifyIdToken(idToken);
+      (req as any).uid = decoded.uid;
+      next();
+    } catch (err) {
+      return res.status(401).json({ error: 'Invalid or expired authentication token.' });
+    }
   };
 
   // Initialize Gemini lazily/safely
@@ -103,9 +156,11 @@ async function startServer() {
   });
 
   // Stripe Payout Endpoint
-  app.post('/api/payments/stripe/payout', async (req, res) => {
+  app.post('/api/payments/stripe/payout', requireAuth, async (req, res) => {
     try {
-      const { userId, amountUsd, accountDetails } = req.body;
+      const { amountUsd, accountDetails } = req.body;
+      // Trust the verified token's uid, never the request body, as the payee identity.
+      const userId = (req as any).uid as string;
       const stripe = getStripeClient();
 
       if (!stripe) {
