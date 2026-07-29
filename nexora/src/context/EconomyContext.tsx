@@ -44,6 +44,11 @@ import {
   FirebaseUser,
   testConnection
 } from '../lib/firebase';
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  updateProfile
+} from 'firebase/auth';
 import { walletService } from '../services/WalletService';
 import { 
   doc, 
@@ -60,7 +65,10 @@ import {
 
 interface EconomyContextType {
   authUser: FirebaseUser | null;
+  authError: string | null;
   loginWithGoogle: () => Promise<void>;
+  loginWithEmail: (email: string, password: string) => Promise<boolean>;
+  signUpWithEmail: (email: string, password: string, displayName?: string) => Promise<boolean>;
   logout: () => Promise<void>;
   wallet: WalletState;
   transactions: TransactionRecord[];
@@ -222,10 +230,31 @@ const INITIAL_TREASURE_BOX: TreasureBox = {
   isUnlocked: false
 };
 
+function getAuthErrorMessage(err: unknown): string {
+  const code = (err as { code?: string })?.code || '';
+  switch (code) {
+    case 'auth/email-already-in-use':
+      return 'An account already exists with this email. Try signing in instead.';
+    case 'auth/invalid-email':
+      return 'Please enter a valid email address.';
+    case 'auth/weak-password':
+      return 'Password should be at least 6 characters.';
+    case 'auth/user-not-found':
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+      return 'Incorrect email or password.';
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Please try again later.';
+    default:
+      return (err as Error)?.message || 'Something went wrong. Please try again.';
+  }
+}
+
 const EconomyContext = createContext<EconomyContextType | undefined>(undefined);
 
 export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [authUser, setAuthUser] = useState<FirebaseUser | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const [wallet, setWallet] = useState<WalletState>(() => {
     const saved = localStorage.getItem('nexora_wallet');
@@ -355,9 +384,38 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const loginWithGoogle = async () => {
     try {
+      setAuthError(null);
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
       console.error('Google Auth Login Error:', err);
+      setAuthError(getAuthErrorMessage(err));
+    }
+  };
+
+  const loginWithEmail = async (email: string, password: string): Promise<boolean> => {
+    try {
+      setAuthError(null);
+      await signInWithEmailAndPassword(auth, email, password);
+      return true;
+    } catch (err) {
+      console.error('Email Sign In Error:', err);
+      setAuthError(getAuthErrorMessage(err));
+      return false;
+    }
+  };
+
+  const signUpWithEmail = async (email: string, password: string, displayName?: string): Promise<boolean> => {
+    try {
+      setAuthError(null);
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      if (displayName && cred.user) {
+        await updateProfile(cred.user, { displayName });
+      }
+      return true;
+    } catch (err) {
+      console.error('Email Sign Up Error:', err);
+      setAuthError(getAuthErrorMessage(err));
+      return false;
     }
   };
 
@@ -967,7 +1025,10 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     <EconomyContext.Provider
       value={{
         authUser,
+        authError,
         loginWithGoogle,
+        loginWithEmail,
+        signUpWithEmail,
         logout,
         wallet,
         transactions,
