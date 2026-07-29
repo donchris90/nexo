@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { TicketedEvent } from '../types';
-import { MOCK_EVENTS } from '../data/mockData';
 import { useEconomy } from '../context/EconomyContext';
 import { eventsService } from '../services/EventsService';
 import { 
@@ -17,12 +16,12 @@ import {
 export const TicketedEventsView: React.FC = () => {
   const { purchaseTicket } = useEconomy();
   const [selectedTicket, setSelectedTicket] = useState<{ event: TicketedEvent; isVip: boolean } | null>(null);
-  const [events, setEvents] = useState<TicketedEvent[]>(MOCK_EVENTS);
+  const [events, setEvents] = useState<TicketedEvent[]>([]);
 
-  // Real-time Firestore subscription: replace placeholder events with live data as soon as it arrives
+  // Real-time Firestore subscription
   useEffect(() => {
     const unsub = eventsService.subscribeToEvents((liveEvents) => {
-      if (liveEvents && liveEvents.length > 0) setEvents(liveEvents);
+      setEvents(liveEvents || []);
     });
     return () => unsub();
   }, []);
@@ -56,6 +55,11 @@ export const TicketedEventsView: React.FC = () => {
 
       {/* EVENT CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {events.length === 0 && (
+          <div className="md:col-span-2 text-center py-14 text-sm text-slate-500">
+            No events scheduled yet — check back soon.
+          </div>
+        )}
         {events.map(ev => (
           <div key={ev.id} className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden p-5 space-y-4 hover:border-amber-400/50 transition-all flex flex-col justify-between">
             <div className="space-y-3">
