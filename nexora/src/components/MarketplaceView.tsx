@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { ShoppingProduct, DigitalProduct, CreatorService } from '../types';
-import { MOCK_SHOPPING_PRODUCTS, MOCK_DIGITAL_PRODUCTS, MOCK_SERVICES } from '../data/mockData';
 import { useEconomy } from '../context/EconomyContext';
 import { marketplaceService } from '../services/MarketplaceService';
 import { 
@@ -24,20 +23,20 @@ export const MarketplaceView: React.FC = () => {
   const { wallet, purchaseProduct, purchaseDigitalGood } = useEconomy();
   const [activeTab, setActiveTab] = useState<'DIGITAL' | 'PHYSICAL' | 'SERVICES' | 'ORDERS' | 'SELLER_HUB'>('DIGITAL');
 
-  const [shoppingProducts, setShoppingProducts] = useState<ShoppingProduct[]>(MOCK_SHOPPING_PRODUCTS);
-  const [digitalProducts, setDigitalProducts] = useState<DigitalProduct[]>(MOCK_DIGITAL_PRODUCTS);
-  const [creatorServices, setCreatorServices] = useState<CreatorService[]>(MOCK_SERVICES);
+  const [shoppingProducts, setShoppingProducts] = useState<ShoppingProduct[]>([]);
+  const [digitalProducts, setDigitalProducts] = useState<DigitalProduct[]>([]);
+  const [creatorServices, setCreatorServices] = useState<CreatorService[]>([]);
 
-  // Real-time Firestore subscriptions: replace placeholder listings with live data as soon as it arrives
+  // Real-time Firestore subscriptions
   useEffect(() => {
     const unsubShopping = marketplaceService.subscribeToShoppingProducts((live) => {
-      if (live && live.length > 0) setShoppingProducts(live);
+      setShoppingProducts(live || []);
     });
     const unsubDigital = marketplaceService.subscribeToDigitalProducts((live) => {
-      if (live && live.length > 0) setDigitalProducts(live);
+      setDigitalProducts(live || []);
     });
     const unsubServices = marketplaceService.subscribeToCreatorServices((live) => {
-      if (live && live.length > 0) setCreatorServices(live);
+      setCreatorServices(live || []);
     });
     return () => {
       unsubShopping();
@@ -156,6 +155,11 @@ export const MarketplaceView: React.FC = () => {
       {/* DIGITAL GOODS GRID */}
       {activeTab === 'DIGITAL' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {digitalProducts.length === 0 && (
+            <div className="md:col-span-3 text-center py-14 text-sm text-slate-500">
+              No digital products listed yet.
+            </div>
+          )}
           {digitalProducts.map(dp => {
             const finalPrice = appliedDiscount > 0 ? Math.floor(dp.priceCoins * (1 - appliedDiscount / 100)) : dp.priceCoins;
             return (
@@ -206,6 +210,11 @@ export const MarketplaceView: React.FC = () => {
       {/* PHYSICAL & LIVE GEAR GRID */}
       {activeTab === 'PHYSICAL' && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {shoppingProducts.length === 0 && (
+            <div className="md:col-span-3 text-center py-14 text-sm text-slate-500">
+              No physical products listed yet.
+            </div>
+          )}
           {shoppingProducts.map(sp => (
             <div key={sp.id} className="bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden p-4 space-y-3 hover:border-purple-500/50 transition-all flex flex-col justify-between">
               <div className="space-y-3">
@@ -245,6 +254,11 @@ export const MarketplaceView: React.FC = () => {
       {/* SERVICES MARKETPLACE */}
       {activeTab === 'SERVICES' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {creatorServices.length === 0 && (
+            <div className="md:col-span-2 text-center py-14 text-sm text-slate-500">
+              No creator services listed yet.
+            </div>
+          )}
           {creatorServices.map(s => (
             <div key={s.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 space-y-4 hover:border-cyan-500/50 transition-all">
               <div className="flex items-center gap-3">
