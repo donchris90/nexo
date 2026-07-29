@@ -38,6 +38,7 @@ import {
   auth, 
   db, 
   googleProvider, 
+  facebookProvider,
   signInWithPopup, 
   signOut, 
   onAuthStateChanged, 
@@ -67,6 +68,7 @@ interface EconomyContextType {
   authUser: FirebaseUser | null;
   authError: string | null;
   loginWithGoogle: () => Promise<void>;
+  loginWithFacebook: () => Promise<void>;
   loginWithEmail: (email: string, password: string) => Promise<boolean>;
   signUpWithEmail: (email: string, password: string, displayName?: string) => Promise<boolean>;
   logout: () => Promise<void>;
@@ -245,6 +247,8 @@ function getAuthErrorMessage(err: unknown): string {
       return 'Incorrect email or password.';
     case 'auth/too-many-requests':
       return 'Too many attempts. Please try again later.';
+    case 'auth/account-exists-with-different-credential':
+      return 'An account already exists with this email using a different sign-in method.';
     default:
       return (err as Error)?.message || 'Something went wrong. Please try again.';
   }
@@ -388,6 +392,16 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
       console.error('Google Auth Login Error:', err);
+      setAuthError(getAuthErrorMessage(err));
+    }
+  };
+
+  const loginWithFacebook = async () => {
+    try {
+      setAuthError(null);
+      await signInWithPopup(auth, facebookProvider);
+    } catch (err) {
+      console.error('Facebook Auth Login Error:', err);
       setAuthError(getAuthErrorMessage(err));
     }
   };
@@ -1027,6 +1041,7 @@ export const EconomyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         authUser,
         authError,
         loginWithGoogle,
+        loginWithFacebook,
         loginWithEmail,
         signUpWithEmail,
         logout,
