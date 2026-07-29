@@ -268,6 +268,13 @@ export class AgoraManager {
     return false;
   }
 
+  /** Explicitly set (not toggle) the local mic mute state — used to sync a seat's
+   * Firestore isMuted flag (which can be changed by the host, not just yourself)
+   * onto the actual Agora audio track. */
+  public setMicMuted(muted: boolean): void {
+    this.localAudioTrack?.setMuted(muted);
+  }
+
   public toggleMuteCamera(): boolean {
     if (this.localVideoTrack) {
       const isMuted = !this.localVideoTrack.muted;
